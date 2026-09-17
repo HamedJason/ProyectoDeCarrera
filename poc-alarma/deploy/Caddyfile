@@ -1,0 +1,20 @@
+# Configuración de Caddy.
+#
+# Al indicar un nombre de dominio, Caddy solicita el certificado a Let's Encrypt
+# la primera vez que arranca y lo renueva solo. Para que funcione, el puerto 80
+# debe estar abierto y el dominio debe resolver a la IP de este servidor.
+#
+# Si se cambia el dominio, hay que cambiarlo también en el firmware del ESP32.
+
+privada.ochil.ddns.net {
+	# Todas las peticiones se reenvían al contenedor del backend.
+	# "backend" es el nombre del servicio en docker-compose.yml, Docker lo
+	# resuelve dentro de su red interna.
+	reverse_proxy backend:3000
+
+	# Registro de accesos, útil para comprobar que el ESP32 está llegando.
+	log {
+		output file /data/acceso.log
+		format console
+	}
+}

@@ -1,0 +1,78 @@
+# Despliegue de la prueba de concepto en el VPS.
+#
+# Levanta tres servicios:
+#   db       PostgreSQL, con los datos en un volumen para que sobrevivan a reinicios
+#   backend  la API de Node
+#   caddy    servidor web que publica el backend y gestiona el certificado HTTPS
+#
+# Caddy solicita y renueva el certificado de Let's Encrypt automáticamente.
+# No hay que ejecutar certbot ni programar renovaciones.
+#
+# Uso:
+#   docker compose up -d      levantar
+#   docker compose logs -f    ver registros
+#   docker compose down       detener
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: alarma_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - datos_postgres:/var/lib/postgresql/data
+    # El backend espera a que la base responda antes de arrancar. Sin esto
+    # el backend falla en el primer intento porque PostgreSQL tarda unos
+    # segundos en aceptar conexiones.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    networks:
+      - alarma
+
+  backend:
+    build: ../backend
+    container_name: alarma_backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      # La base viaja por la red interna de Docker, que no sale del servidor,
+      # por lo que no se habilita TLS en esa conexión.
+      PGSSL: "off"
+      DEVICE_TOKEN: ${DEVICE_TOKEN}
+      PORT: "3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - alarma
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: alarma_caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+    networks:
+      - alarma
+
+volumes:
+  datos_postgres:
+  caddy_data:
+  caddy_config:
+
+networks:
+  alarma:
+    driver: bridge

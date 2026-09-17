@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "Alarma PoC",
+    "slug": "alarma-poc",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#F4F6F7"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "mx.uabc.alarmapoc"
+    }
+  }
+}

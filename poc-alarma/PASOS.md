@@ -1,0 +1,356 @@
+# Guía de puesta en marcha
+
+Despliegue en un VPS propio con Docker, desde una computadora con Windows.
+
+**Regla de lectura:** cada bloque dice dónde se ejecuta.
+
+- 🪟 **En tu PC (Windows)** — se escribe en PowerShell o en el Arduino IDE
+- 🐧 **En el VPS (Linux)** — se escribe en la ventana de SSH, ya conectado al servidor
+
+Casi todo ocurre en el VPS. Windows solo se usa para conectarse, hacer pruebas y
+cargar el firmware.
+
+Tiempo estimado: 45 a 60 minutos la primera vez.
+
+---
+
+## Antes de empezar
+
+Ten a la mano:
+
+- El usuario y la contraseña (o llave) de tu VPS
+- El dominio: `privada.ochil.ddns.net`
+- La placa ESP32 y un cable USB que transmita datos, no solo carga
+
+Un aviso sobre NO-IP: si tu cuenta es gratuita, el hostname se borra si no lo
+confirmas cada 30 días. Si se borra a mitad del semestre, el ESP32 deja de
+encontrar el servidor. Pon un recordatorio mensual.
+
+---
+
+## Paso 1 — Conectarte al VPS 🪟
+
+Windows 10 y 11 ya traen SSH, no necesitas PuTTY.
+
+Abre **PowerShell** (tecla Windows, escribe `powershell`, Enter) y ejecuta,
+cambiando `usuario` por el tuyo:
+
+```powershell
+ssh usuario@privada.ochil.ddns.net
+```
+
+La primera vez pregunta si confías en el servidor. Escribe `yes` y Enter.
+Luego pide la contraseña. **Al escribirla no se ve nada, ni asteriscos.** Es
+normal, escríbela completa y da Enter.
+
+**Verificación:** el texto antes del cursor cambia a algo como
+`usuario@servidor:~$`. A partir de aquí estás escribiendo en el VPS.
+
+---
+
+## Paso 2 — Revisar que los puertos estén libres 🐧
+
+Como ya tienes Docker con otro proyecto, hay que confirmar que nada esté usando
+los puertos 80 y 443. Si algo los ocupa, Caddy no podrá arrancar.
+
+```bash
+sudo ss -lntp | grep -E ':80 |:443 '
+```
+
+**Dos resultados posibles:**
+
+- **No imprime nada.** Los puertos están libres. Continúa al paso 3.
+- **Imprime una o más líneas.** Algo los está usando. Anota qué es y
+  continúa de todos modos hasta el paso 5, donde se explica qué hacer.
+
+Confirma también que Docker responde:
+
+```bash
+docker ps
+```
+
+Debe mostrar una tabla, aunque esté vacía. Si dice "permission denied", antepón
+`sudo` a todos los comandos de docker de esta guía.
+
+---
+
+## Paso 3 — Subir el código al VPS
+
+### 3.1 Publicar en GitHub 🪟
+
+El repositorio con README es un entregable de la actividad, así que esto sirve
+para dos cosas a la vez.
+
+Crea un repositorio vacío en <https://github.com/new>. No marques ninguna casilla
+de inicialización. Luego, en PowerShell, dentro de la carpeta del proyecto:
+
+```powershell
+cd C:\ruta\donde\tengas\poc-alarma
+git init
+git add .
+git commit -m "Prueba de concepto: firmware, backend y despliegue"
+git branch -M main
+git remote add origin https://github.com/TU_USUARIO/poc-alarma.git
+git push -u origin main
+```
+
+Si `git` no existe, instálalo desde <https://git-scm.com/download/win> y vuelve a
+abrir PowerShell.
+
+### 3.2 Clonar en el VPS 🐧
+
+```bash
+cd ~
+git clone https://github.com/TU_USUARIO/poc-alarma.git
+cd poc-alarma/deploy
+```
+
+**Verificación:**
+
+```bash
+ls
+```
+
+Debe listar `docker-compose.yml`, `Caddyfile` y `.env.example`.
+
+---
+
+## Paso 4 — Configurar y levantar 🐧
+
+Sigues dentro de `~/poc-alarma/deploy`.
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Se abre un editor de texto. Cambia dos valores:
+
+- `POSTGRES_PASSWORD` — pon una contraseña propia, sin espacios ni comillas
+- `DEVICE_TOKEN` — invéntate uno, por ejemplo `alarma-uabc-2026`
+
+Para guardar en nano: `Ctrl+O`, Enter, y luego `Ctrl+X` para salir.
+
+Apunta el `DEVICE_TOKEN` que pusiste, lo necesitas en el firmware.
+
+Ahora levanta todo:
+
+```bash
+docker compose up -d --build
+```
+
+La primera vez tarda entre 2 y 4 minutos porque descarga las imágenes y construye
+el backend.
+
+**Verificación:**
+
+```bash
+docker compose ps
+```
+
+Los tres servicios (`alarma_db`, `alarma_backend`, `alarma_caddy`) deben aparecer
+como `running` o `Up`. Si alguno dice `Exited` o `Restarting`, ve al paso 5.
+
+---
+
+## Paso 5 — Comprobar que responde
+
+### 5.1 Desde el propio VPS 🐧
+
+```bash
+curl http://localhost:80/salud -H "Host: privada.ochil.ddns.net"
+```
+
+Debe responder un JSON con `"estado":"ok"` y `"base_de_datos":"conectada"`.
+
+Si no responde, revisa los registros:
+
+```bash
+docker compose logs backend --tail 30
+docker compose logs caddy --tail 30
+```
+
+### 5.2 Desde Windows 🪟
+
+Abre **otra** ventana de PowerShell, sin cerrar la del SSH.
+
+> **Importante:** en PowerShell, `curl` no es el curl real, es un alias de otro
+> comando y se comporta distinto. Escribe siempre **`curl.exe`** con la extensión.
+
+```powershell
+curl.exe https://privada.ochil.ddns.net/salud
+```
+
+Debe responder el mismo JSON, ahora por HTTPS. Si funciona, el certificado ya se
+emitió correctamente.
+
+**Toma captura de pantalla de esta respuesta.** Es la evidencia del backend
+desplegado que pide la actividad.
+
+> El certificado tarda entre 10 y 60 segundos en emitirse la primera vez. Si falla,
+> espera un minuto y repite.
+
+### 5.3 Probar un dato válido y uno incorrecto 🪟
+
+Cambia `TU_TOKEN` por el que pusiste en el `.env`. Cada comando va en **una sola
+línea**.
+
+Dato válido, debe responder **201**:
+
+```powershell
+curl.exe -X POST https://privada.ochil.ddns.net/mediciones -H "Content-Type: application/json" -H "X-Device-Token: TU_TOKEN" -d "{\"vivienda_id\":\"casa-001\",\"zona\":\"entrada\",\"nodo_id\":\"nodo-01\",\"sensor_id\":\"sensor-puerta-01\",\"variable\":\"estado_puerta\",\"valor\":1,\"unidad\":\"estado\",\"numero_registro\":1}"
+```
+
+Dato incorrecto, debe responder **400** y enumerar los errores:
+
+```powershell
+curl.exe -X POST https://privada.ochil.ddns.net/mediciones -H "Content-Type: application/json" -H "X-Device-Token: TU_TOKEN" -d "{\"vivienda_id\":\"casa-001\",\"nodo_id\":\"nodo-01\",\"variable\":\"estado_puerta\",\"valor\":\"abierto\"}"
+```
+
+Guarda ambas salidas. Son la evidencia de la prueba de dato incorrecto.
+
+### Si los puertos 80 o 443 estaban ocupados
+
+Caddy aparecerá como `Exited` y los registros dirán `address already in use`.
+Dos caminos:
+
+**a) Tu otro proyecto usa Docker con esos puertos.** Ve qué contenedor los tiene:
+
+```bash
+docker ps --format "table {{.Names}}\t{{.Ports}}"
+```
+
+**b) Solución rápida sin tocar el otro proyecto.** Usa otros puertos: edita
+`docker-compose.yml` con `nano docker-compose.yml`, cambia en el servicio `caddy`
+las líneas de puertos a `"8080:80"` y `"8443:443"`, y levanta de nuevo con
+`docker compose up -d`. En ese caso, en el firmware usarás
+`https://privada.ochil.ddns.net:8443`.
+
+Ojo: con puertos alternos, Let's Encrypt no puede validar el dominio por el método
+normal, porque exige el puerto 80. Si caes en este caso, avísame y ajustamos la
+configuración para usar HTTP simple con el token, que la rúbrica sí acepta.
+
+---
+
+## Paso 6 — Cargar el firmware 🪟
+
+### 6.1 Preparar el Arduino IDE
+
+1. Instala el Arduino IDE desde <https://www.arduino.cc/en/software>
+2. **Archivo → Preferencias**. En *Gestor de URLs adicionales de tarjetas* pega:
+
+```
+https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+```
+
+3. **Herramientas → Placa → Gestor de tarjetas**. Busca `esp32`, instala el de
+   Espressif. Tarda varios minutos.
+4. **Herramientas → Gestionar librerías**. Busca `ArduinoJson` e instala la
+   **versión 7**. Con la 6 no compila.
+
+### 6.2 Configurar
+
+Abre `firmware\nodo_sensor\nodo_sensor.ino` y edita estas cuatro líneas:
+
+```cpp
+const char* WIFI_SSID     = "nombre de tu red wifi";
+const char* WIFI_PASSWORD = "password de tu wifi";
+const char* BACKEND_BASE  = "https://privada.ochil.ddns.net";
+const char* DEVICE_TOKEN  = "TU_TOKEN";
+```
+
+`BACKEND_BASE` va **sin diagonal al final**. El `DEVICE_TOKEN` debe ser idéntico
+al del `.env` del VPS.
+
+> El ESP32 solo se conecta a redes de 2.4 GHz. Si tu router tiene una red separada
+> de 5 GHz, usa la de 2.4.
+
+### 6.3 Conectar el botón
+
+| ESP32 | Componente |
+|---|---|
+| GPIO 4 | una pata del push button |
+| GND | la otra pata del push button |
+
+No hace falta resistencia: el firmware activa la interna del microcontrolador.
+El LED ya está integrado en la placa, no se cablea.
+
+### 6.4 Cargar
+
+1. Conecta el ESP32 por USB
+2. **Herramientas → Placa → ESP32 Arduino → ESP32 Dev Module**
+3. **Herramientas → Puerto**, elige el COM que aparezca
+4. Botón de subir (la flecha)
+
+**Verificación.** Abre **Herramientas → Monitor Serie** y pon **115200 baudios**
+en la esquina. Debe verse la conexión Wi-Fi y su IP. Al presionar el botón:
+
+```
+[Evento] registro=1 estado=ABIERTA
+[POST /mediciones] registro=1 valor=1 codigo=201 latencia=245 ms
+```
+
+Si el código es **201**, la cadena completa funciona de punta a punta.
+
+---
+
+## Paso 7 — Ejecutar las pruebas 🪟
+
+1. **Diez transmisiones.** Presiona y suelta el botón diez veces, esperando unos
+   segundos entre cada una. Del monitor serie anota para cada una: número de
+   registro, código HTTP y latencia. Copia toda la salida a un archivo de texto.
+
+2. **Dato incorrecto.** Ya lo hiciste en el paso 5.3, guarda esa salida.
+
+3. **Pérdida de conexión.** Apaga el Wi-Fi del router. Presiona el botón tres
+   veces. El monitor debe mostrar que los eventos van al buffer local. Vuelve a
+   encender el Wi-Fi y verifica que se sincronizan solos.
+
+4. **Conteo final.** Confirma que hay diez registros o más:
+
+```powershell
+curl.exe "https://privada.ochil.ddns.net/mediciones?vivienda_id=casa-001"
+```
+
+5. **Video.** Graba de 30 a 60 segundos mostrando: el botón presionándose, el
+   monitor serie con el 201, y la consulta devolviendo el dato.
+
+Mándame la salida del monitor serie y lleno las tablas del documento con tus
+números reales.
+
+---
+
+## Problemas comunes
+
+| Síntoma | Causa | Solución |
+|---|---|---|
+| `curl` en PowerShell da error raro | `curl` es alias de otro comando | Usa `curl.exe` con extensión |
+| No compila, error en `JsonDocument` | ArduinoJson versión 6 | Instala la versión 7 |
+| `codigo=-1` en el monitor | URL con diagonal final, o el certificado aún no se emite | Quita la diagonal, espera un minuto |
+| `codigo=401` | El token del firmware no coincide con el del `.env` | Compara ambos carácter por carácter |
+| `codigo=404` | `BACKEND_BASE` mal escrito | Revisa que sea exactamente el dominio |
+| El ESP32 no aparece en Puerto | Falta driver USB, o el cable es solo de carga | Instala driver CP2102 o CH340, prueba otro cable |
+| No conecta al Wi-Fi | Red de 5 GHz | Usa la red de 2.4 GHz |
+| `alarma_caddy` en `Exited` | Puertos 80 o 443 ocupados | Ver la sección al final del paso 5 |
+| `alarma_backend` reiniciándose | Contraseña de Postgres con caracteres raros | Usa solo letras y números en `.env` |
+
+### Comandos útiles en el VPS 🐧
+
+```bash
+cd ~/poc-alarma/deploy
+
+docker compose ps                    # estado de los servicios
+docker compose logs -f backend       # ver registros en vivo (Ctrl+C para salir)
+docker compose restart backend       # reiniciar solo el backend
+docker compose down                  # detener todo
+docker compose up -d --build         # levantar de nuevo tras cambiar código
+```
+
+Para actualizar el código después de un cambio:
+
+```bash
+cd ~/poc-alarma
+git pull
+cd deploy
+docker compose up -d --build
+```
