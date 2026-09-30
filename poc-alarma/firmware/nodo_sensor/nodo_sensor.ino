@@ -88,9 +88,15 @@ int  lecturaPuertaEstable = HIGH;
 int  lecturaPuertaPrevia  = HIGH;
 unsigned long tUltimoCambioPuerta = 0;
 
-int  lecturaPirPrevia = LOW;
 unsigned long tUltimoEventoPir = 0;
 bool pirListo = false;   // true cuando termino el tiempo de estabilizacion
+
+// El AM312 mantiene su salida en alto solo unos 2 segundos. Si el programa esta
+// ocupado en una peticion HTTP (que puede tardar hasta 5 s con el servidor
+// caido), un sondeo podria perder el pulso por completo. Por eso el flanco de
+// subida se captura con una interrupcion, que no depende de lo que haga el ciclo.
+volatile bool pirPulso = false;
+void IRAM_ATTR alDetectarPir() { pirPulso = true; }
 
 unsigned long tUltimoEstado = 0;
 unsigned long contadorRegistro = 0;
@@ -488,8 +494,8 @@ void setup() {
   Serial.print(" Vivienda: "); Serial.println(VIVIENDA_ID);
   Serial.print(" Nodo:     "); Serial.println(NODO_ID);
   Serial.print(" Sensores: ");
-  if (USAR_PUERTA) Serial.print("puerta ");
-  if (USAR_PIR)    Serial.print("movimiento");
+  if (USAR_PUERTA) { Serial.print("puerta (GPIO "); Serial.print(PIN_PUERTA); Serial.print(") "); }
+  if (USAR_PIR)    { Serial.print("movimiento (GPIO "); Serial.print(PIN_PIR); Serial.print(")"); }
   Serial.println();
   Serial.println("==========================================");
 
@@ -525,26 +531,29 @@ void loop() {
   // ---- Sensor de movimiento ----
   if (USAR_PIR) {
     if (!pirListo) {
-      // Se ignora durante la estabilizacion. Al terminar se toma la lectura
-      // actual como referencia, para no contar como evento un nivel alto que
-      // ya estaba presente.
+      // Se ignora durante la estabilizacion. La interrupcion se activa hasta
+      // que termina, para que el arranque del sensor no cuente como evento.
       if (millis() >= PIR_ESTABILIZACION_MS) {
         pirListo = true;
-        lecturaPirPrevia = digitalRead(PIN_PIR);
-        Serial.print("[PIR] Listo. Lectura inicial: ");
-        Serial.println(lecturaPirPrevia);
+        pirPulso = false;
+        attachInterrupt(digitalPinToInterrupt(PIN_PIR), alDetectarPir, RISING);
+        Serial.print("[PIR] Listo en GPIO ");
+        Serial.print(PIN_PIR);
+        Serial.print(". Lectura inicial: ");
+        Serial.println(digitalRead(PIN_PIR));
       }
-    } else {
-      int lectura = digitalRead(PIN_PIR);
+    } else if (pirPulso) {
+      pirPulso = false;
+      Serial.println("[PIR] Pulso detectado");
 
-      // Solo interesa el flanco de subida, y con un bloqueo posterior para no
-      // inundar de eventos mientras alguien permanece en la habitacion
-      if (lectura == HIGH && lecturaPirPrevia == LOW &&
-          millis() - tUltimoEventoPir > BLOQUEO_PIR_MS) {
+      // Bloqueo posterior para no inundar de eventos mientras alguien
+      // permanece en la habitacion
+      if (millis() - tUltimoEventoPir > BLOQUEO_PIR_MS) {
         tUltimoEventoPir = millis();
         procesarEvento("movimiento", "sala", "pir-sala-01", 1, true);
+      } else {
+        Serial.println("   Ignorado por el bloqueo entre eventos de movimiento.");
       }
-      lecturaPirPrevia = lectura;
     }
   }
 
