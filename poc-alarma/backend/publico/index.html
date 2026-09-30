@@ -3,278 +3,356 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#1B2631">
+<meta name="theme-color" content="#E6EBE7">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Alarma">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icono.png">
 <title>Seguridad residencial</title>
 <style>
+  /*
+   * Identidad visual.
+   * La casa se dibuja como un plano en planta y el plano es la interfaz: los
+   * muros indican si el sistema esta armado, la hoja de la puerta se abre cuando
+   * el contacto magnetico se separa, y el cono del sensor se enciende cuando hay
+   * movimiento. El color tiene un solo significado por tono: pino para armado,
+   * ambar para actividad y rojo unicamente para una alarma.
+   *
+   * La tipografia (Bricolage Grotesque, licencia OFL) se sirve desde el propio
+   * backend para que funcione sin Internet y sobre HTTP.
+   */
+  @font-face {
+    font-family: "Bricolage";
+    src: url("fuentes/bricolage-latin.woff2") format("woff2-variations");
+    font-weight: 200 800;
+    font-stretch: 75% 100%;
+    font-display: swap;
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  }
+
   :root {
-    --fondo: #0F1620;
-    --panel: #1A2430;
-    --panel-alto: #22303F;
-    --borde: #2E3D4E;
-    --texto: #E8EDF2;
-    --texto-tenue: #93A4B5;
-    --verde: #2ECC71;
-    --rojo: #E74C3C;
-    --ambar: #F39C12;
-    --azul: #3498DB;
+    --yeso: #E6EBE7;
+    --papel: #F6F8F5;
+    --tinta: #15302B;
+    --tinta-2: #4B625C;
+    --linea: #C5D0CA;
+    --pino: #17695A;
+    --pino-claro: #D3E6DF;
+    --sirena: #D22F27;
+    --sirena-claro: #F8DAD6;
+    --ambar: #E39B12;
+    --ambar-texto: #8A5A00;
+    color-scheme: light;
   }
 
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
   body {
     margin: 0;
-    background: var(--fondo);
-    color: var(--texto);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--yeso);
+    color: var(--tinta);
+    font-family: "Bricolage", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 16px;
+    line-height: 1.45;
     padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
     -webkit-font-smoothing: antialiased;
   }
 
-  .envoltura { max-width: 520px; margin: 0 auto; padding: 16px 16px 40px; }
+  button { font: inherit; color: inherit; }
+  :focus-visible { outline: 3px solid var(--pino); outline-offset: 3px; }
 
-  header { padding: 8px 0 18px; }
-  h1 { font-size: 20px; margin: 0; font-weight: 700; letter-spacing: -0.2px; }
-  .subtitulo { font-size: 13px; color: var(--texto-tenue); margin-top: 3px; }
+  .envoltura { max-width: 520px; margin: 0 auto; padding: 14px 16px 44px; }
+  .columna { min-width: 0; }
 
-  /* ---- Aviso de comunicación ---- */
+  /* ---- Barra superior ---- */
+  .barra {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; padding: 6px 2px 14px;
+  }
+  .vivienda { font-weight: 700; font-size: 17px; letter-spacing: -0.01em; }
+  .conexion { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--tinta-2); }
+  .punto-vivo { width: 8px; height: 8px; border-radius: 50%; background: var(--pino); flex-shrink: 0; }
+  .punto-vivo.muerto { background: var(--sirena); }
+
+  /* ---- Aviso de comunicacion ---- */
   #aviso {
     display: none;
-    background: #3B1F1C;
-    border: 1px solid #7A3A32;
-    border-radius: 10px;
+    background: var(--sirena-claro);
+    border-left: 4px solid var(--sirena);
+    border-radius: 6px;
     padding: 12px 14px;
     margin-bottom: 14px;
-    font-size: 13px;
-    line-height: 1.45;
+    font-size: 14px;
   }
   #aviso.visible { display: block; }
   #aviso button {
     margin-top: 8px; background: none; border: none; padding: 0;
-    color: var(--rojo); font-weight: 700; font-size: 13px; cursor: pointer;
+    color: var(--sirena); font-weight: 700; text-decoration: underline; cursor: pointer;
   }
 
-  /* ---- Tarjeta de estado ---- */
-  .estado {
-    border-radius: 16px;
-    padding: 22px 20px;
-    margin-bottom: 14px;
-    border: 1px solid var(--borde);
-    background: var(--panel);
-    transition: background .25s, border-color .25s;
+  /* ---- Escena: titular, plano y controles ---- */
+  .escena {
+    background: var(--papel);
+    border: 1px solid var(--linea);
+    border-radius: 22px;
+    padding: 22px 18px 18px;
+    margin-bottom: 26px;
+    transition: background-color .3s, border-color .3s;
   }
-  .estado.armado { background: #16301F; border-color: #2F6B45; }
-  .estado.desarmado { background: var(--panel); }
+  .escena.alarma { background: var(--sirena-claro); border-color: var(--sirena); }
 
-  .etiqueta {
-    font-size: 11px; letter-spacing: .09em; text-transform: uppercase;
-    color: var(--texto-tenue); margin-bottom: 8px;
+  .titular {
+    margin: 0;
+    font-size: clamp(31px, 8.6vw, 42px);
+    font-weight: 800;
+    font-stretch: 86%;
+    line-height: 1.02;
+    letter-spacing: -0.025em;
+    text-wrap: balance;
   }
-  .estado-texto { font-size: 30px; font-weight: 800; letter-spacing: -0.5px; }
-  .estado-desde { font-size: 13px; color: var(--texto-tenue); margin-top: 6px; }
+  .escena.alarma .titular { color: var(--sirena); }
+  .subtitular { margin: 8px 0 0; font-size: 15px; color: var(--tinta-2); min-height: 1.45em; }
+
+  /* ---- Plano ---- */
+  #plano { display: block; width: 100%; height: auto; margin: 18px 0 6px; overflow: visible; }
+  #plano .piso { fill: var(--yeso); transition: fill .3s; }
+  .escena.alarma #plano .piso { fill: #F3C4BE; }
+
+  #plano .particion { fill: none; stroke: var(--linea); stroke-width: 3; }
+  #plano .muros {
+    fill: none; stroke-width: 6; stroke-linejoin: miter;
+    stroke: var(--tinta-2); stroke-opacity: .6; stroke-dasharray: 12 9;
+    transition: stroke .3s, stroke-opacity .3s, stroke-dasharray .3s;
+  }
+  .escena.armado #plano .muros { stroke: var(--pino); stroke-opacity: 1; stroke-dasharray: 700 0; }
+  .escena.alarma #plano .muros {
+    stroke: var(--sirena); stroke-opacity: 1; stroke-dasharray: 700 0;
+    animation: latido .7s ease-in-out infinite alternate;
+  }
+  @keyframes latido { from { stroke-opacity: 1; } to { stroke-opacity: .3; } }
+
+  #plano .hoja {
+    stroke: var(--tinta); stroke-width: 4; stroke-linecap: round;
+    transform-origin: 64px 200px; transition: transform .45s cubic-bezier(.3, 1.4, .5, 1), stroke .3s;
+  }
+  #plano .arco { fill: none; stroke: var(--ambar); stroke-width: 1.5; stroke-dasharray: 3 4; opacity: 0; transition: opacity .3s; }
+  #plano.puerta-abierta .hoja { transform: rotate(-75deg); stroke: var(--ambar); }
+  #plano.puerta-abierta .arco { opacity: 1; }
+  .escena.alarma #plano.puerta-abierta .hoja { stroke: var(--sirena); }
+
+  #plano .cono { fill: var(--ambar); opacity: 0; transform-origin: 300px 40px; }
+  #plano.movimiento .cono { animation: cono 1.5s ease-out infinite; }
+  @keyframes cono {
+    0%   { opacity: .55; transform: scale(.35); }
+    100% { opacity: 0;   transform: scale(1); }
+  }
+  #plano .sensor-pir { fill: var(--tinta); }
+  #plano.movimiento .sensor-pir { fill: var(--ambar); }
+  #plano .zona { font-size: 12px; font-weight: 600; fill: var(--tinta-2); letter-spacing: .01em; }
+
+  /* ---- Lectura de cada sensor ---- */
+  .sensores { list-style: none; margin: 10px 0 4px; padding: 0; border-top: 1px solid var(--linea); }
+  .sensores li {
+    display: grid; grid-template-columns: 26px 1fr auto; align-items: center;
+    column-gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--linea);
+  }
+  .escena.alarma .sensores, .escena.alarma .sensores li { border-color: #E8AEA7; }
+  .sensores .glifo { width: 26px; height: 26px; }
+  .sensores .glifo * { fill: none; stroke: var(--tinta-2); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .sensor-nombre { display: block; font-weight: 600; font-size: 15px; }
+  .sensor-lectura { display: block; font-size: 14px; color: var(--tinta-2); }
+  .sensor-lectura.actividad { color: var(--ambar-texto); font-weight: 600; }
+  .sensor-cuando { font-size: 13px; color: var(--tinta-2); font-variant-numeric: tabular-nums; text-align: right; }
 
   /* ---- Botones ---- */
+  .controles { display: grid; gap: 10px; margin-top: 16px; }
   .boton {
-    width: 100%; border: none; border-radius: 12px;
-    padding: 16px; font-size: 16px; font-weight: 700;
-    color: #fff; cursor: pointer; margin-top: 14px;
-    font-family: inherit; transition: opacity .15s, transform .08s;
+    width: 100%; border: 2px solid transparent; border-radius: 12px;
+    padding: 15px 16px; font-size: 17px; font-weight: 700; letter-spacing: -0.005em;
+    cursor: pointer; transition: transform .08s, opacity .15s, background-color .2s;
   }
   .boton:active { transform: scale(.985); }
-  .boton:disabled { opacity: .5; cursor: default; }
-  .boton.armar { background: var(--verde); color: #08210F; }
-  .boton.desarmar { background: var(--panel-alto); border: 1px solid var(--borde); color: var(--texto); }
-  .boton.sirena { background: var(--rojo); }
-  .boton.sirena.activa { background: var(--ambar); color: #2B1A00; }
+  .boton:disabled { opacity: .55; cursor: default; }
+  .boton.armar { background: var(--pino); color: #fff; }
+  .boton.desarmar { background: transparent; border-color: var(--tinta); color: var(--tinta); }
+  .boton.apagar-alarma { background: var(--sirena); color: #fff; font-size: 19px; padding: 18px 16px; }
+  .boton[hidden] { display: none; }
 
-  /* ---- Alarma activa ---- */
-  #tarjeta-alarma {
-    display: none;
-    background: #4A1512; border: 2px solid var(--rojo);
-    border-radius: 16px; padding: 20px; margin-bottom: 14px;
-    animation: pulso 1s ease-in-out infinite;
+  /* ---- Ajustes ---- */
+  .fila {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 14px 2px; border-bottom: 1px solid var(--linea);
   }
-  #tarjeta-alarma.visible { display: block; }
-  #tarjeta-alarma .alarma-titulo { font-size: 26px; font-weight: 800; color: #FFD9D5; }
-  #tarjeta-alarma .alarma-detalle { font-size: 13px; color: #F1B7B0; margin-top: 6px; line-height: 1.5; }
-  .boton.apagar-alarma { background: #fff; color: #7A1A12; }
-  @keyframes pulso {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, .55); }
-    50%      { box-shadow: 0 0 0 10px rgba(231, 76, 60, 0); }
-  }
+  .fila:first-of-type { border-top: 1px solid var(--linea); }
+  .fila .titulo { font-weight: 600; font-size: 16px; }
+  .fila .nota { font-size: 13px; color: var(--tinta-2); margin-top: 2px; max-width: 34ch; }
 
-  /* ---- Borrar historial (solo pruebas) ---- */
-  #zona-pruebas { display: none; margin-top: 18px; text-align: center; }
-  #zona-pruebas.visible { display: block; }
-  .boton-texto {
-    background: none; border: 1px dashed var(--borde); border-radius: 10px;
-    color: var(--texto-tenue); font-size: 13px; padding: 10px 14px;
-    cursor: pointer; font-family: inherit;
-  }
-  .boton-texto.confirmar { border-color: var(--rojo); color: var(--rojo); font-weight: 700; }
-  .nota-pruebas { font-size: 11px; color: #5A6B7C; margin-top: 6px; }
-
-  /* ---- Sensores ---- */
-  .sensores { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
-  .sensor {
-    background: var(--panel); border: 1px solid var(--borde);
-    border-radius: 14px; padding: 14px 16px;
-  }
-  .sensor .nombre { font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--texto-tenue); }
-  .sensor .lectura { font-size: 19px; font-weight: 800; margin-top: 6px; }
-  .sensor .lectura.abierta { color: var(--rojo); }
-  .sensor .lectura.cerrada { color: var(--verde); }
-  .sensor .lectura.movimiento { color: var(--ambar); }
-  .sensor .lectura.sin-dato { color: var(--texto-tenue); font-size: 15px; font-weight: 600; }
-  .sensor .cuando { font-size: 12px; color: var(--texto-tenue); margin-top: 4px; }
-
-  /* ---- Interruptor de modo silencioso ---- */
-  .fila-opcion {
-    display: flex; align-items: center; justify-content: space-between;
-    background: var(--panel); border: 1px solid var(--borde);
-    border-radius: 12px; padding: 14px 16px; margin-bottom: 14px;
-  }
-  .fila-opcion .titulo { font-size: 15px; font-weight: 600; }
-  .fila-opcion .nota { font-size: 12px; color: var(--texto-tenue); margin-top: 2px; }
   .interruptor {
-    position: relative; width: 50px; height: 30px; flex-shrink: 0;
-    background: var(--panel-alto); border: 1px solid var(--borde);
-    border-radius: 999px; cursor: pointer; transition: background .2s;
+    position: relative; width: 52px; height: 30px; flex-shrink: 0; padding: 0;
+    background: #B9C6BF; border: none; border-radius: 999px; cursor: pointer;
+    transition: background-color .2s;
   }
-  .interruptor.activo { background: var(--azul); border-color: var(--azul); }
   .interruptor::after {
     content: ""; position: absolute; top: 3px; left: 3px;
-    width: 22px; height: 22px; border-radius: 50%; background: #fff;
-    transition: transform .2s;
+    width: 24px; height: 24px; border-radius: 50%; background: #fff;
+    box-shadow: 0 1px 2px rgba(21, 48, 43, .35); transition: transform .2s;
   }
-  .interruptor.activo::after { transform: translateX(20px); }
+  .interruptor.activo { background: var(--pino); }
+  .interruptor.activo::after { transform: translateX(22px); }
 
-  /* ---- Último evento ---- */
-  .tarjeta {
-    background: var(--panel); border: 1px solid var(--borde);
-    border-radius: 14px; padding: 18px; margin-bottom: 14px;
+  .boton-texto {
+    background: none; border: 1.5px solid var(--tinta-2); border-radius: 9px;
+    padding: 8px 14px; font-size: 14px; font-weight: 600; cursor: pointer; flex-shrink: 0;
   }
-  .valor-grande { font-size: 26px; font-weight: 800; margin-top: 4px; }
-  .valor-grande.abierta { color: var(--rojo); }
-  .valor-grande.cerrada { color: var(--verde); }
-  .valor-grande.movimiento { color: var(--ambar); }
-  /* pre-line conserva el salto de línea del texto, para separar la fecha
-     de la identificación del sensor en dos renglones */
-  .detalle { font-size: 13px; color: var(--texto-tenue); margin-top: 6px; line-height: 1.5; white-space: pre-line; }
+  .boton-texto.activa { background: var(--ambar); border-color: var(--ambar); color: #2B1A00; }
+  .boton-texto.confirmar { border-color: var(--sirena); color: var(--sirena); }
 
-  /* ---- Historial ---- */
-  h2 {
-    font-size: 13px; letter-spacing: .08em; text-transform: uppercase;
-    color: var(--texto-tenue); margin: 24px 0 10px; font-weight: 700;
+  /* ---- Historial como linea de tiempo ---- */
+  h2 { margin: 30px 0 4px; font-size: 20px; font-weight: 800; font-stretch: 90%; letter-spacing: -0.02em; }
+  .linea { list-style: none; margin: 0; padding: 0; }
+  .hito { display: grid; grid-template-columns: 22px 1fr; column-gap: 10px; }
+  .hito .riel { position: relative; }
+  .hito .riel::before {
+    content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 2px;
+    margin-left: -1px; background: var(--linea);
   }
-  .evento {
-    display: flex; align-items: center; gap: 12px;
-    background: var(--panel); border: 1px solid var(--borde);
-    border-radius: 10px; padding: 12px 14px; margin-bottom: 8px;
+  .hito:first-child .riel::before { top: 22px; }
+  .hito:last-child .riel::before { bottom: calc(100% - 22px); }
+  .hito .marca {
+    position: absolute; left: 50%; top: 17px; width: 12px; height: 12px;
+    margin-left: -6px; border-radius: 50%; background: var(--yeso);
+    border: 2px solid var(--tinta-2);
   }
-  .punto { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
-  .evento .cuerpo { flex: 1; min-width: 0; }
-  .evento .principal { font-size: 15px; font-weight: 600; }
-  .evento .secundario { font-size: 12px; color: var(--texto-tenue); margin-top: 2px; }
-  .evento .num { font-size: 11px; color: #64748B; flex-shrink: 0; }
+  .hito.actividad .marca { background: var(--ambar); border-color: var(--ambar); }
+  .hito.alarma .marca { background: var(--sirena); border-color: var(--sirena); }
+  .hito.cerrada .marca { background: var(--pino); border-color: var(--pino); }
+  .hito .texto { padding: 12px 0 12px; border-bottom: 1px solid var(--linea); min-width: 0; }
+  .hito:last-child .texto { border-bottom: none; }
+  .hito .quien { font-weight: 600; font-size: 16px; }
+  .hito .cuando { font-size: 13px; color: var(--tinta-2); font-variant-numeric: tabular-nums; }
 
-  .vacio, .cargando {
-    text-align: center; color: var(--texto-tenue);
-    font-size: 14px; padding: 32px 16px; line-height: 1.6;
+  .vacio, .cargando { color: var(--tinta-2); font-size: 15px; padding: 18px 2px; max-width: 36ch; }
+
+  /* ---- Pruebas y pie ---- */
+  #zona-pruebas { display: none; margin-top: 22px; }
+  #zona-pruebas.visible { display: block; }
+  #zona-pruebas .nota { font-size: 12px; color: var(--tinta-2); margin-top: 8px; }
+  .pie { margin-top: 30px; font-size: 12px; color: var(--tinta-2); line-height: 1.6; }
+
+  /* ---- Escritorio: escena a la izquierda, ajustes e historial a la derecha ---- */
+  @media (min-width: 900px) {
+    .envoltura {
+      max-width: 1000px; padding-top: 24px;
+      display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr);
+      column-gap: 48px; align-items: start;
+    }
+    .barra, #aviso, .pie { grid-column: 1 / -1; }
+    .escena { margin-bottom: 0; position: sticky; top: 24px; }
+    h2:first-child { margin-top: 0; }
   }
 
-  .pie {
-    text-align: center; font-size: 11px; color: #5A6B7C;
-    margin-top: 28px; line-height: 1.7;
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    #plano.movimiento .cono { opacity: .35; transform: none; }
   }
-  .punto-vivo {
-    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
-    background: var(--verde); margin-right: 5px; vertical-align: middle;
-  }
-  .punto-vivo.muerto { background: var(--rojo); }
 </style>
 </head>
 <body>
 <div class="envoltura">
 
-  <header>
-    <h1>Seguridad residencial</h1>
-    <div class="subtitulo" id="encabezado-vivienda">Cargando...</div>
+  <header class="barra">
+    <div class="vivienda" id="encabezado-vivienda">Vivienda</div>
+    <div class="conexion" role="status">
+      <span class="punto-vivo" id="punto-vivo"></span><span id="pie-texto">Conectando</span>
+    </div>
   </header>
 
-  <div id="aviso">
+  <div id="aviso" role="alert">
     <div id="aviso-texto"></div>
     <button onclick="refrescar(true)">Reintentar</button>
   </div>
 
-  <div id="tarjeta-alarma">
-    <div class="etiqueta" style="color:#F1B7B0">Alarma</div>
-    <div class="alarma-titulo">ALARMA ACTIVA</div>
-    <div class="alarma-detalle" id="alarma-detalle">Se detectó actividad con el sistema armado.</div>
-    <button class="boton apagar-alarma" id="boton-apagar-alarma" onclick="apagarAlarma()">Apagar alarma</button>
-  </div>
+  <section class="escena desarmado" id="escena" aria-label="Estado de la casa">
+    <h1 class="titular" id="titular" aria-live="polite">Consultando la casa</h1>
+    <p class="subtitular" id="subtitular"></p>
 
-  <div class="estado desarmado" id="tarjeta-estado">
-    <div class="etiqueta">Estado del sistema</div>
-    <div class="estado-texto" id="estado-texto">--</div>
-    <div class="estado-desde" id="estado-desde"></div>
-    <button class="boton armar" id="boton-armado" onclick="alternarArmado()">Armar</button>
-  </div>
+    <svg id="plano" viewBox="0 0 340 230" role="img"
+         aria-label="Plano de la casa con la puerta de entrada y el sensor de movimiento de la sala">
+      <rect class="piso" x="24" y="24" width="292" height="176"/>
+      <path class="cono" id="cono" d="M300 40 L266.4 165.6 A130 130 0 0 1 170.5 51.3 Z"/>
+      <path class="particion" d="M130 24 V105 M130 145 V200"/>
+      <path class="muros" id="muros" d="M64 200 H24 V24 H316 V200 H104"/>
+      <path class="arco" d="M104 200 A40 40 0 0 0 74.4 161.4"/>
+      <line class="hoja" x1="64" y1="200" x2="104" y2="200"/>
+      <circle class="sensor-pir" cx="300" cy="40" r="7"/>
+      <text class="zona" x="40" y="52">Entrada</text>
+      <text class="zona" x="146" y="52">Sala</text>
+    </svg>
 
-  <div class="fila-opcion">
-    <div>
-      <div class="titulo">Modo silencioso</div>
-      <div class="nota">Registra y notifica sin activar la sirena</div>
+    <ul class="sensores">
+      <li>
+        <svg class="glifo" viewBox="0 0 26 26" aria-hidden="true"><path d="M4 22 H22"/><path d="M8 22 V4 H18 V22"/><circle cx="15.5" cy="13" r=".6"/></svg>
+        <div>
+          <span class="sensor-nombre">Puerta de entrada</span>
+          <span class="sensor-lectura" id="sensor-puerta">Sin datos</span>
+        </div>
+        <span class="sensor-cuando" id="sensor-puerta-cuando"></span>
+      </li>
+      <li>
+        <svg class="glifo" viewBox="0 0 26 26" aria-hidden="true"><circle cx="21" cy="5" r="1.4"/><path d="M21 5 L5 12"/><path d="M21 5 L9 22"/><path d="M5 12 A17 17 0 0 0 9 22"/></svg>
+        <div>
+          <span class="sensor-nombre">Movimiento en la sala</span>
+          <span class="sensor-lectura" id="sensor-movimiento">Sin detecciones</span>
+        </div>
+        <span class="sensor-cuando" id="sensor-movimiento-cuando"></span>
+      </li>
+    </ul>
+
+    <div class="controles">
+      <button class="boton apagar-alarma" id="boton-apagar-alarma" onclick="apagarAlarma()" hidden>Apagar alarma</button>
+      <button class="boton armar" id="boton-armado" onclick="alternarArmado()">Armar la casa</button>
     </div>
-    <div class="interruptor" id="interruptor-silencio" onclick="alternarSilencio()"></div>
-  </div>
+  </section>
 
-  <div class="fila-opcion">
-    <div>
-      <div class="titulo">Avisos en este dispositivo</div>
-      <div class="nota" id="nota-avisos">Vibración, sonido y notificación cuando suene la alarma</div>
+  <div class="columna">
+    <section aria-label="Ajustes">
+      <div class="fila">
+        <div>
+          <div class="titulo">Modo silencioso</div>
+          <div class="nota">Registra y notifica sin encender la sirena</div>
+        </div>
+        <button class="interruptor" id="interruptor-silencio" role="switch" aria-checked="false"
+                aria-label="Modo silencioso" onclick="alternarSilencio()"></button>
+      </div>
+      <div class="fila">
+        <div>
+          <div class="titulo">Avisos en este dispositivo</div>
+          <div class="nota" id="nota-avisos">Vibración, sonido y notificación cuando suene la alarma</div>
+        </div>
+        <button class="interruptor" id="interruptor-avisos" role="switch" aria-checked="false"
+                aria-label="Avisos en este dispositivo" onclick="alternarAvisos()"></button>
+      </div>
+      <div class="fila">
+        <div>
+          <div class="titulo">Probar la sirena</div>
+          <div class="nota">Enciende la salida sin necesidad de una alarma</div>
+        </div>
+        <button class="boton-texto" id="boton-sirena" onclick="alternarSirena()">Encender</button>
+      </div>
+    </section>
+
+    <h2>Historial</h2>
+    <ol class="linea" id="lista"><li class="cargando">Consultando el servidor</li></ol>
+
+    <div id="zona-pruebas">
+      <button class="boton-texto" id="boton-limpiar" onclick="limpiarHistorial()">Borrar historial</button>
+      <div class="nota">Solo disponible en modo de pruebas</div>
     </div>
-    <div class="interruptor" id="interruptor-avisos" onclick="alternarAvisos()"></div>
   </div>
 
-  <div class="sensores">
-    <div class="sensor">
-      <div class="nombre">Puerta</div>
-      <div class="lectura sin-dato" id="sensor-puerta">Sin datos</div>
-      <div class="cuando" id="sensor-puerta-cuando"></div>
-    </div>
-    <div class="sensor">
-      <div class="nombre">Movimiento</div>
-      <div class="lectura sin-dato" id="sensor-movimiento">Sin datos</div>
-      <div class="cuando" id="sensor-movimiento-cuando"></div>
-    </div>
-  </div>
-
-  <div class="tarjeta">
-    <div class="etiqueta">Último evento</div>
-    <div class="valor-grande" id="ultimo-valor">--</div>
-    <div class="detalle" id="ultimo-detalle">Sin registros todavía</div>
-  </div>
-
-  <button class="boton sirena" id="boton-sirena" onclick="alternarSirena()">Probar sirena</button>
-
-  <h2>Historial <span id="conteo"></span></h2>
-  <div id="lista"><div class="cargando">Consultando el servidor...</div></div>
-
-  <div id="zona-pruebas">
-    <button class="boton-texto" id="boton-limpiar" onclick="limpiarHistorial()">Borrar historial</button>
-    <div class="nota-pruebas">Solo disponible en modo de pruebas</div>
-  </div>
-
-  <div class="pie">
-    <span class="punto-vivo" id="punto-vivo"></span><span id="pie-texto">Conectando</span><br>
-    Proyecto de Carrera · UABC FCQI
-  </div>
+  <div class="pie">Proyecto de Carrera, UABC FCQI</div>
 
 </div>
 
@@ -285,11 +363,14 @@
 const VIVIENDA = new URLSearchParams(location.search).get('vivienda') || 'casa-001';
 const INTERVALO_MS = 2500;
 const TIEMPO_LIMITE_MS = 8000;
+const MOVIMIENTO_RECIENTE_S = 12;   // cuánto tiempo se considera "ahora" una detección
 
 let estado = { armado: false, modo_silencioso: false, actuador_activo: false, alarma_activa: false };
 let ocupado = false;
-let primeraCarga = true;   // evita alertar por una alarma que ya estaba activa al abrir la app
 let fallosSeguidos = 0;
+let primeraCarga = true;   // evita alertar por una alarma que ya estaba activa al abrir la app
+
+const $ = (id) => document.getElementById(id);
 
 // ===================== Utilidades =====================
 
@@ -309,36 +390,24 @@ async function pedir(ruta, opciones = {}) {
 function formatearFecha(iso) {
   if (!iso) return '';
   const d = new Date(iso);
-  const hoy = new Date();
-  const mismoDia = d.toDateString() === hoy.toDateString();
   const hora = d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  if (mismoDia) return 'Hoy ' + hora;
+  if (d.toDateString() === new Date().toDateString()) return 'Hoy ' + hora;
   return d.toLocaleDateString('es-MX', { day: '2-digit', month: 'short' }) + ' ' + hora;
 }
 
 function hace(iso) {
   if (!iso) return '';
-  const seg = Math.floor((Date.now() - new Date(iso)) / 1000);
+  const seg = Math.max(0, Math.floor((Date.now() - new Date(iso)) / 1000));
   if (seg < 60) return 'hace ' + seg + ' s';
   if (seg < 3600) return 'hace ' + Math.floor(seg / 60) + ' min';
   if (seg < 86400) return 'hace ' + Math.floor(seg / 3600) + ' h';
   return 'hace ' + Math.floor(seg / 86400) + ' días';
 }
 
-// Traduce el valor numérico a algo que el usuario entienda
-function interpretar(m) {
-  if (!m) return { texto: '--', clase: '' };
-  if (m.variable === 'estado_puerta') {
-    return Number(m.valor) === 1
-      ? { texto: 'PUERTA ABIERTA', clase: 'abierta' }
-      : { texto: 'PUERTA CERRADA', clase: 'cerrada' };
-  }
-  if (m.variable === 'movimiento') {
-    return Number(m.valor) === 1
-      ? { texto: 'MOVIMIENTO', clase: 'movimiento' }
-      : { texto: 'SIN MOVIMIENTO', clase: 'cerrada' };
-  }
-  return { texto: m.valor + ' ' + (m.unidad || ''), clase: '' };
+function nombreVivienda(id) {
+  // "casa-001" se muestra como "Casa 001"
+  const t = id.replace(/[-_]+/g, ' ');
+  return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
 /*
@@ -357,126 +426,141 @@ function mensajeDeError(e) {
 }
 
 function mostrarAviso(mensaje) {
-  const caja = document.getElementById('aviso');
-  document.getElementById('aviso-texto').textContent = mensaje;
-  caja.classList.add('visible');
-  document.getElementById('punto-vivo').classList.add('muerto');
-  document.getElementById('pie-texto').textContent = 'Sin conexión con el servidor';
+  $('aviso-texto').textContent = mensaje;
+  $('aviso').classList.add('visible');
+  $('punto-vivo').classList.add('muerto');
+  $('pie-texto').textContent = 'Sin conexión';
 }
 
 function ocultarAviso() {
-  document.getElementById('aviso').classList.remove('visible');
-  document.getElementById('punto-vivo').classList.remove('muerto');
+  $('aviso').classList.remove('visible');
+  $('punto-vivo').classList.remove('muerto');
 }
 
 // ===================== Pintado =====================
 
 function pintarEstado() {
-  const tarjeta = document.getElementById('tarjeta-estado');
-  const texto = document.getElementById('estado-texto');
-  const boton = document.getElementById('boton-armado');
+  const alarma = !!estado.alarma_activa;
+  const clase = alarma ? 'alarma' : (estado.armado ? 'armado' : 'desarmado');
+  $('escena').className = 'escena ' + clase;
 
-  if (estado.armado) {
-    tarjeta.className = 'estado armado';
-    texto.textContent = 'ARMADO';
-    boton.textContent = 'Desarmar';
-    boton.className = 'boton desarmar';
+  if (alarma) {
+    $('titular').textContent = estado.alarma_motivo || 'Actividad detectada';
+    $('subtitular').textContent = 'La alarma está sonando con la casa armada';
   } else {
-    tarjeta.className = 'estado desarmado';
-    texto.textContent = 'DESARMADO';
-    boton.textContent = 'Armar';
-    boton.className = 'boton armar';
+    $('titular').textContent = estado.armado ? 'La casa está armada' : 'La casa está desarmada';
+    $('subtitular').textContent = estado.actualizado_en
+      ? (estado.armado ? 'Armada' : 'Desarmada') + ' desde ' + formatearFecha(estado.actualizado_en).toLowerCase()
+      : '';
   }
 
-  document.getElementById('estado-desde').textContent =
-    estado.actualizado_en ? 'Desde ' + formatearFecha(estado.actualizado_en) : '';
+  const boton = $('boton-armado');
+  boton.textContent = estado.armado ? 'Desarmar la casa' : 'Armar la casa';
+  boton.className = 'boton ' + (estado.armado ? 'desarmar' : 'armar');
+  $('boton-apagar-alarma').hidden = !alarma;
 
-  document.getElementById('interruptor-silencio').className =
-    'interruptor' + (estado.modo_silencioso ? ' activo' : '');
+  const silencio = $('interruptor-silencio');
+  silencio.className = 'interruptor' + (estado.modo_silencioso ? ' activo' : '');
+  silencio.setAttribute('aria-checked', String(!!estado.modo_silencioso));
 
-  const alarma = document.getElementById('tarjeta-alarma');
-  alarma.classList.toggle('visible', !!estado.alarma_activa);
-  if (!estado.alarma_activa) restaurarTitulo();
-  document.getElementById('alarma-detalle').textContent =
-    (estado.alarma_motivo || 'Se detectó actividad') + ' con el sistema armado.';
+  const sirena = $('boton-sirena');
+  sirena.textContent = estado.actuador_activo ? 'Apagar' : 'Encender';
+  sirena.className = 'boton-texto' + (estado.actuador_activo ? ' activa' : '');
 
-  const sirena = document.getElementById('boton-sirena');
-  sirena.textContent = estado.actuador_activo ? 'Apagar sirena' : 'Probar sirena';
-  sirena.className = 'boton sirena' + (estado.actuador_activo ? ' activa' : '');
+  if (!alarma) restaurarTitulo();
 }
 
-// Muestra la lectura mas reciente de cada sensor, tomada del historial
+// Muestra la lectura más reciente de cada sensor, tomada del historial
 function pintarSensores(mediciones) {
   const puerta = mediciones.find(m => m.variable === 'estado_puerta');
   const mov = mediciones.find(m => m.variable === 'movimiento');
+  const plano = $('plano');
 
-  const pp = document.getElementById('sensor-puerta');
-  if (puerta) {
-    const i = interpretar(puerta);
-    pp.textContent = Number(puerta.valor) === 1 ? 'Abierta' : 'Cerrada';
-    pp.className = 'lectura ' + i.clase;
-    document.getElementById('sensor-puerta-cuando').textContent = hace(puerta.creado_en);
-  } else {
-    pp.textContent = 'Sin datos';
-    pp.className = 'lectura sin-dato';
-    document.getElementById('sensor-puerta-cuando').textContent = '';
-  }
+  const abierta = !!puerta && Number(puerta.valor) === 1;
+  plano.classList.toggle('puerta-abierta', abierta);
+  const lp = $('sensor-puerta');
+  lp.textContent = puerta ? (abierta ? 'Abierta' : 'Cerrada') : 'Sin datos';
+  lp.className = 'sensor-lectura' + (abierta ? ' actividad' : '');
+  $('sensor-puerta-cuando').textContent = puerta ? hace(puerta.creado_en) : '';
 
-  const pm = document.getElementById('sensor-movimiento');
-  if (mov) {
-    pm.textContent = 'Detectado';
-    pm.className = 'lectura movimiento';
-    document.getElementById('sensor-movimiento-cuando').textContent = hace(mov.creado_en);
-  } else {
-    pm.textContent = 'Sin detecciones';
-    pm.className = 'lectura sin-dato';
-    document.getElementById('sensor-movimiento-cuando').textContent = '';
-  }
+  const reciente = !!mov && (Date.now() - new Date(mov.creado_en)) / 1000 < MOVIMIENTO_RECIENTE_S;
+  plano.classList.toggle('movimiento', reciente);
+  const lm = $('sensor-movimiento');
+  lm.textContent = reciente ? 'Movimiento ahora' : (mov ? 'Sin movimiento' : 'Sin detecciones');
+  lm.className = 'sensor-lectura' + (reciente ? ' actividad' : '');
+  $('sensor-movimiento-cuando').textContent = mov ? (reciente ? '' : 'última vez ' + hace(mov.creado_en)) : '';
 }
 
-function pintarEventos(mediciones) {
-  const lista = document.getElementById('lista');
-  document.getElementById('conteo').textContent = mediciones.length ? '(' + mediciones.length + ')' : '';
+// Une las lecturas de los sensores con las acciones del usuario en una sola línea de tiempo
+function construirHitos(mediciones, acciones) {
+  const hitos = [];
 
-  // Estado de ausencia de datos, distinto del de error
-  if (!mediciones.length) {
-    lista.innerHTML = '<div class="vacio">Todavía no hay eventos registrados.<br>Abre una puerta o pasa frente al sensor para generar el primero.</div>';
-    document.getElementById('ultimo-valor').textContent = '--';
-    document.getElementById('ultimo-valor').className = 'valor-grande';
-    document.getElementById('ultimo-detalle').textContent = 'Sin registros todavía';
+  for (const m of mediciones) {
+    const zona = m.zona ? ' en ' + m.zona : '';
+    if (m.variable === 'estado_puerta') {
+      const abierta = Number(m.valor) === 1;
+      hitos.push({ t: m.creado_en, clase: abierta ? 'actividad' : 'cerrada', titulo: abierta ? 'Puerta abierta' : 'Puerta cerrada', detalle: zona });
+    } else if (m.variable === 'movimiento') {
+      hitos.push({ t: m.creado_en, clase: 'actividad', titulo: 'Movimiento detectado', detalle: zona });
+    } else {
+      hitos.push({ t: m.creado_en, clase: '', titulo: m.variable + ' ' + m.valor, detalle: zona });
+    }
+  }
+
+  const textos = {
+    armar:             ['Casa armada', ''],
+    desarmar:          ['Casa desarmada', ''],
+    alarma_activada:   ['Alarma activada', 'alarma'],
+    alarma_terminada:  ['Alarma terminada por tiempo', ''],
+    apagar_alarma:     ['Alarma apagada desde la app', ''],
+    alarma_silenciosa: ['Alarma en modo silencioso, sin sirena', 'alarma']
+  };
+  for (const a of acciones) {
+    let titulo, clase = '';
+    if (textos[a.accion]) {
+      [titulo, clase] = textos[a.accion];
+    } else if (a.accion === 'modo_silencioso') {
+      titulo = a.valor_nuevo === 'true' ? 'Modo silencioso activado' : 'Modo silencioso desactivado';
+    } else if (a.accion === 'salida_audible') {
+      titulo = a.valor_nuevo === 'true' ? 'Prueba de sirena encendida' : 'Prueba de sirena apagada';
+    } else {
+      titulo = a.accion;
+    }
+    hitos.push({ t: a.creado_en, clase, titulo, detalle: a.usuario && a.usuario !== 'residente' ? ' desde ' + a.usuario : '' });
+  }
+
+  return hitos.sort((x, y) => new Date(y.t) - new Date(x.t)).slice(0, 40);
+}
+
+function pintarHistorial(hitos) {
+  const lista = $('lista');
+
+  // Ausencia de datos, distinta de un error: se indica qué hacer
+  if (!hitos.length) {
+    lista.innerHTML = '<li class="vacio">Todavía no hay eventos. Abre la puerta o pasa frente al sensor de la sala para generar el primero.</li>';
     return;
   }
 
-  const ultima = mediciones[0];
-  const interp = interpretar(ultima);
-  document.getElementById('ultimo-valor').textContent = interp.texto;
-  document.getElementById('ultimo-valor').className = 'valor-grande ' + interp.clase;
-  document.getElementById('ultimo-detalle').textContent =
-    formatearFecha(ultima.creado_en) + ' · ' + hace(ultima.creado_en) + '\n' +
-    (ultima.zona || 'sin zona') + ' · ' + ultima.nodo_id + ' · registro ' + (ultima.numero_registro ?? '-');
-
-  lista.innerHTML = mediciones.map(m => {
-    const i = interpretar(m);
-    const color = i.clase === 'abierta' ? 'var(--rojo)'
-                : i.clase === 'movimiento' ? 'var(--ambar)' : 'var(--verde)';
-    return '<div class="evento">' +
-      '<div class="punto" style="background:' + color + '"></div>' +
-      '<div class="cuerpo">' +
-        '<div class="principal">' + i.texto + '</div>' +
-        '<div class="secundario">' + formatearFecha(m.creado_en) + ' · ' + (m.zona || 'sin zona') + '</div>' +
+  lista.innerHTML = hitos.map(h =>
+    '<li class="hito ' + h.clase + '">' +
+      '<div class="riel"><span class="marca"></span></div>' +
+      '<div class="texto">' +
+        '<div class="quien">' + h.titulo + '</div>' +
+        '<div class="cuando">' + formatearFecha(h.t) + h.detalle + '</div>' +
       '</div>' +
-      '<div class="num">#' + (m.numero_registro ?? m.id) + '</div>' +
-    '</div>';
-  }).join('');
+    '</li>'
+  ).join('');
 }
 
 // ===================== Comunicación =====================
 
 async function refrescar(manual = false) {
   try {
-    const [est, med] = await Promise.all([
-      pedir('/estado?vivienda_id=' + encodeURIComponent(VIVIENDA)),
-      pedir('/mediciones?vivienda_id=' + encodeURIComponent(VIVIENDA) + '&limite=40')
+    const q = encodeURIComponent(VIVIENDA);
+    const [est, med, acc] = await Promise.all([
+      pedir('/estado?vivienda_id=' + q),
+      pedir('/mediciones?vivienda_id=' + q + '&limite=40'),
+      pedir('/acciones?vivienda_id=' + q + '&limite=40')
     ]);
 
     if (est) {
@@ -487,14 +571,16 @@ async function refrescar(manual = false) {
       if (est.alarma_activa && !antes && primeraCarga === false) alertar(est.alarma_motivo);
       primeraCarga = false;
     }
-    const lista = med && med.mediciones ? med.mediciones : [];
-    pintarSensores(lista);
-    pintarEventos(lista);
+
+    const mediciones = med && med.mediciones ? med.mediciones : [];
+    const acciones = acc && acc.acciones ? acc.acciones : [];
+    pintarSensores(mediciones);
+    pintarHistorial(construirHitos(mediciones, acciones));
 
     fallosSeguidos = 0;
     ocultarAviso();
-    document.getElementById('pie-texto').textContent = 'Actualizado ' + formatearFecha(new Date().toISOString());
-    document.getElementById('encabezado-vivienda').textContent = 'Vivienda ' + VIVIENDA;
+    $('pie-texto').textContent = 'Actualizado ' + new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    $('encabezado-vivienda').textContent = nombreVivienda(VIVIENDA);
   } catch (e) {
     fallosSeguidos++;
     // Se avisa al segundo fallo, para no alarmar por un parpadeo de la red
@@ -505,23 +591,25 @@ async function refrescar(manual = false) {
 async function cambiarEstado(cambios) {
   if (ocupado) return;
   ocupado = true;
-  document.getElementById('boton-armado').disabled = true;
+  $('boton-armado').disabled = true;
+  $('boton-apagar-alarma').disabled = true;
   try {
     const r = await pedir('/estado', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ vivienda_id: VIVIENDA, usuario: 'residente', ...cambios })
     });
-    if (r) { estado = r; pintarEstado(); ocultarAviso(); }
+    if (r) { estado = r; pintarEstado(); ocultarAviso(); refrescar(); }
   } catch (e) {
     mostrarAviso(mensajeDeError(e));
   } finally {
     ocupado = false;
-    document.getElementById('boton-armado').disabled = false;
+    $('boton-armado').disabled = false;
+    $('boton-apagar-alarma').disabled = false;
   }
 }
 
-const alternarArmado  = () => cambiarEstado({ armado: !estado.armado });
+const alternarArmado   = () => cambiarEstado({ armado: !estado.armado });
 const alternarSilencio = () => cambiarEstado({ modo_silencioso: !estado.modo_silencioso });
 const alternarSirena   = () => cambiarEstado({ actuador_activo: !estado.actuador_activo });
 const apagarAlarma     = () => cambiarEstado({ alarma_activa: false });
@@ -548,7 +636,8 @@ function guardarPreferencia(v) {
 }
 
 function pintarAvisos() {
-  document.getElementById('interruptor-avisos').className = 'interruptor' + (avisosActivos ? ' activo' : '');
+  $('interruptor-avisos').className = 'interruptor' + (avisosActivos ? ' activo' : '');
+  $('interruptor-avisos').setAttribute('aria-checked', String(avisosActivos));
 }
 
 async function alternarAvisos() {
@@ -598,7 +687,7 @@ function alertar(motivo) {
   try { sonar(0.25); setTimeout(() => sonar(0.25), 400); setTimeout(() => sonar(0.25), 800); } catch (e) { /* sin audio */ }
 
   if (window.isSecureContext && 'Notification' in window && Notification.permission === 'granted') {
-    try { new Notification('ALARMA ACTIVA', { body: (motivo || 'Se detectó actividad') + ' · ' + VIVIENDA, tag: 'alarma' }); } catch (e) { /* se ignora */ }
+    try { new Notification('ALARMA ACTIVA', { body: (motivo || 'Se detectó actividad') + ' en ' + nombreVivienda(VIVIENDA), tag: 'alarma' }); } catch (e) { /* se ignora */ }
   }
 }
 
@@ -615,8 +704,8 @@ async function cargarConfiguracion() {
   try {
     const c = await pedir('/configuracion');
     if (!c) return;
-    document.getElementById('zona-pruebas').classList.toggle('visible', !!c.modo_pruebas);
-    document.getElementById('nota-avisos').textContent = c.notificaciones_push
+    $('zona-pruebas').classList.toggle('visible', !!c.modo_pruebas);
+    $('nota-avisos').textContent = c.notificaciones_push
       ? 'Vibración, sonido y notificación con la app abierta. Las notificaciones push del servidor están activas.'
       : 'Vibración, sonido y notificación con la app abierta. Las notificaciones push del servidor están desactivadas.';
   } catch (e) { /* se reintenta en el siguiente arranque */ }
@@ -624,7 +713,7 @@ async function cargarConfiguracion() {
 
 // Dos toques para evitar borrar por accidente, sin usar cuadros de dialogo
 async function limpiarHistorial() {
-  const boton = document.getElementById('boton-limpiar');
+  const boton = $('boton-limpiar');
   if (!confirmandoBorrado) {
     boton.textContent = 'Toca de nuevo para confirmar';
     boton.classList.add('confirmar');
@@ -638,7 +727,7 @@ async function limpiarHistorial() {
   clearTimeout(confirmandoBorrado);
   confirmandoBorrado = null;
   boton.classList.remove('confirmar');
-  boton.textContent = 'Borrando...';
+  boton.textContent = 'Borrando';
   try {
     await pedir('/limpiar', {
       method: 'POST',
