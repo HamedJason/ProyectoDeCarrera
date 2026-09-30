@@ -19,7 +19,7 @@ Tiempo estimado: 45 a 60 minutos la primera vez.
 Ten a la mano:
 
 - El usuario y la contraseña (o llave) de tu VPS
-- El dominio: `privada.ochil.ddns.net`
+- El dominio: `privadaochil.ddns.net`
 - La placa ESP32 y un cable USB que transmita datos, no solo carga
 
 Un aviso sobre NO-IP: si tu cuenta es gratuita, el hostname se borra si no lo
@@ -36,7 +36,7 @@ Abre **PowerShell** (tecla Windows, escribe `powershell`, Enter) y ejecuta,
 cambiando `usuario` por el tuyo:
 
 ```powershell
-ssh usuario@privada.ochil.ddns.net
+ssh usuario@privadaochil.ddns.net
 ```
 
 La primera vez pregunta si confías en el servidor. Escribe `yes` y Enter.
@@ -48,20 +48,20 @@ normal, escríbela completa y da Enter.
 
 ---
 
-## Paso 2 — Revisar que los puertos estén libres 🐧
+## Paso 2 — Revisar que el puerto esté libre 🐧
 
-Como ya tienes Docker con otro proyecto, hay que confirmar que nada esté usando
-los puertos 80 y 443. Si algo los ocupa, Caddy no podrá arrancar.
+Este servidor ya tiene otro proyecto usando los puertos 80 y 443, por eso el
+backend se publica en el **8080**. Confirma que ese puerto sí esté libre:
 
 ```bash
-sudo ss -lntp | grep -E ':80 |:443 '
+sudo ss -lntp | grep ':8080 '
 ```
 
 **Dos resultados posibles:**
 
-- **No imprime nada.** Los puertos están libres. Continúa al paso 3.
-- **Imprime una o más líneas.** Algo los está usando. Anota qué es y
-  continúa de todos modos hasta el paso 5, donde se explica qué hacer.
+- **No imprime nada.** El puerto está libre. Continúa al paso 3.
+- **Imprime una línea.** Está ocupado. Al final del paso 5 se explica cómo
+  cambiar el número.
 
 Confirma también que Docker responde:
 
@@ -111,7 +111,7 @@ cd poc-alarma/deploy
 ls
 ```
 
-Debe listar `docker-compose.yml`, `Caddyfile` y `.env.example`.
+Debe listar `docker-compose.yml`, `.env.example` y `Caddyfile`, este último sin uso por ahora.
 
 ---
 
@@ -148,8 +148,8 @@ el backend.
 docker compose ps
 ```
 
-Los tres servicios (`alarma_db`, `alarma_backend`, `alarma_caddy`) deben aparecer
-como `running` o `Up`. Si alguno dice `Exited` o `Restarting`, ve al paso 5.
+Los dos servicios (`alarma_db` y `alarma_backend`) deben aparecer como `running`
+o `Up`. Si alguno dice `Exited` o `Restarting`, revisa los registros del paso 5.
 
 ---
 
@@ -158,7 +158,7 @@ como `running` o `Up`. Si alguno dice `Exited` o `Restarting`, ve al paso 5.
 ### 5.1 Desde el propio VPS 🐧
 
 ```bash
-curl http://localhost:80/salud -H "Host: privada.ochil.ddns.net"
+curl http://localhost:8080/salud
 ```
 
 Debe responder un JSON con `"estado":"ok"` y `"base_de_datos":"conectada"`.
@@ -167,8 +167,15 @@ Si no responde, revisa los registros:
 
 ```bash
 docker compose logs backend --tail 30
-docker compose logs caddy --tail 30
+docker compose logs db --tail 30
 ```
+
+> **Nota sobre el puerto y HTTPS.** En este servidor los puertos 80 y 443 están
+> ocupados por otro proyecto, por lo que el backend se publica en el **8080** por
+> HTTP. Let's Encrypt valida los dominios a través del puerto 80, así que no es
+> posible emitir un certificado mientras ese puerto esté en uso. El acceso sigue
+> protegido por el token del dispositivo y la actividad no exige cifrado en esta
+> etapa. Por eso las URL de aquí en adelante usan `http://` y el puerto `:8080`.
 
 ### 5.2 Desde Windows 🪟
 
@@ -178,57 +185,98 @@ Abre **otra** ventana de PowerShell, sin cerrar la del SSH.
 > comando y se comporta distinto. Escribe siempre **`curl.exe`** con la extensión.
 
 ```powershell
-curl.exe https://privada.ochil.ddns.net/salud
+curl.exe http://privadaochil.ddns.net:8080/salud
 ```
 
-Debe responder el mismo JSON, ahora por HTTPS. Si funciona, el certificado ya se
-emitió correctamente.
+Debe responder el mismo JSON, ahora desde fuera del servidor. Si funciona, el
+backend ya es alcanzable por Internet.
 
 **Toma captura de pantalla de esta respuesta.** Es la evidencia del backend
 desplegado que pide la actividad.
 
-> El certificado tarda entre 10 y 60 segundos en emitirse la primera vez. Si falla,
-> espera un minuto y repite.
+### 5.3 Probar un dato válido y uno incorrecto 🐧
 
-### 5.3 Probar un dato válido y uno incorrecto 🪟
+> **Estos dos comandos se ejecutan en la ventana del SSH, no en PowerShell.**
+> PowerShell destroza las comillas dentro del JSON antes de que curl las reciba,
+> y el resultado es un error de llaves sin cerrar. En Linux las comillas simples
+> protegen el contenido tal cual, así que es mucho más simple hacerlo aquí. La
+> evidencia vale igual: lo que se está probando es el backend, no el sistema
+> operativo desde el que se le llama.
 
-Cambia `TU_TOKEN` por el que pusiste en el `.env`. Cada comando va en **una sola
-línea**.
+Cambia `TU_TOKEN` por el que pusiste en el `.env`.
 
 Dato válido, debe responder **201**:
 
-```powershell
-curl.exe -X POST https://privada.ochil.ddns.net/mediciones -H "Content-Type: application/json" -H "X-Device-Token: TU_TOKEN" -d "{\"vivienda_id\":\"casa-001\",\"zona\":\"entrada\",\"nodo_id\":\"nodo-01\",\"sensor_id\":\"sensor-puerta-01\",\"variable\":\"estado_puerta\",\"valor\":1,\"unidad\":\"estado\",\"numero_registro\":1}"
+```bash
+curl -s -w "\n--> HTTP %{http_code}\n" -X POST http://localhost:8080/mediciones \
+  -H "Content-Type: application/json" \
+  -H "X-Device-Token: TU_TOKEN" \
+  -d '{"vivienda_id":"casa-001","zona":"entrada","nodo_id":"nodo-01","sensor_id":"sensor-puerta-01","variable":"estado_puerta","valor":1,"unidad":"estado","numero_registro":1}'
 ```
 
 Dato incorrecto, debe responder **400** y enumerar los errores:
 
-```powershell
-curl.exe -X POST https://privada.ochil.ddns.net/mediciones -H "Content-Type: application/json" -H "X-Device-Token: TU_TOKEN" -d "{\"vivienda_id\":\"casa-001\",\"nodo_id\":\"nodo-01\",\"variable\":\"estado_puerta\",\"valor\":\"abierto\"}"
+```bash
+curl -s -w "\n--> HTTP %{http_code}\n" -X POST http://localhost:8080/mediciones \
+  -H "Content-Type: application/json" \
+  -H "X-Device-Token: TU_TOKEN" \
+  -d '{"vivienda_id":"casa-001","nodo_id":"nodo-01","variable":"estado_puerta","valor":"abierto"}'
 ```
 
 Guarda ambas salidas. Son la evidencia de la prueba de dato incorrecto.
 
-### Si los puertos 80 o 443 estaban ocupados
+#### Si de todos modos lo quieres correr desde Windows
 
-Caddy aparecerá como `Exited` y los registros dirán `address already in use`.
-Dos caminos:
+Hay que anteponer `--%`, que le indica a PowerShell que deje de interpretar el
+resto de la línea y lo pase tal cual al programa. Sin ese símbolo, las comillas
+del JSON se pierden.
 
-**a) Tu otro proyecto usa Docker con esos puertos.** Ve qué contenedor los tiene:
+```powershell
+curl.exe --% -X POST http://privadaochil.ddns.net:8080/mediciones -H "Content-Type: application/json" -H "X-Device-Token: TU_TOKEN" -d "{\"vivienda_id\":\"casa-001\",\"zona\":\"entrada\",\"nodo_id\":\"nodo-01\",\"sensor_id\":\"sensor-puerta-01\",\"variable\":\"estado_puerta\",\"valor\":1,\"unidad\":\"estado\",\"numero_registro\":1}"
+```
+
+### Si el puerto 8080 también estuviera ocupado
+
+El contenedor `alarma_backend` no arrancará y los registros dirán
+`port is already allocated`. Para ver qué lo tiene:
 
 ```bash
+sudo ss -lntp | grep ':8080 '
 docker ps --format "table {{.Names}}\t{{.Ports}}"
 ```
 
-**b) Solución rápida sin tocar el otro proyecto.** Usa otros puertos: edita
-`docker-compose.yml` con `nano docker-compose.yml`, cambia en el servicio `caddy`
-las líneas de puertos a `"8080:80"` y `"8443:443"`, y levanta de nuevo con
-`docker compose up -d`. En ese caso, en el firmware usarás
-`https://privada.ochil.ddns.net:8443`.
+La solución es elegir otro número. Edita el archivo:
 
-Ojo: con puertos alternos, Let's Encrypt no puede validar el dominio por el método
-normal, porque exige el puerto 80. Si caes en este caso, avísame y ajustamos la
-configuración para usar HTTP simple con el token, que la rúbrica sí acepta.
+```bash
+nano docker-compose.yml
+```
+
+Busca la línea `- "8080:3000"` y cambia solo el número de la izquierda, por
+ejemplo `- "8090:3000"`. Guarda con `Ctrl+O`, Enter, `Ctrl+X`, y levanta de nuevo:
+
+```bash
+docker compose up -d
+```
+
+Después ajusta ese mismo puerto en `BACKEND_BASE` del firmware.
+
+### Si responde en el VPS pero no desde Windows
+
+El backend funciona pero el puerto está cerrado hacia fuera. Dos lugares que
+revisar:
+
+```bash
+sudo ufw status
+```
+
+Si aparece `Status: active`, abre el puerto:
+
+```bash
+sudo ufw allow 8080/tcp
+```
+
+Si tu proveedor de VPS tiene además un firewall propio en su panel web, abre ahí
+el puerto 8080 también.
 
 ---
 
@@ -255,7 +303,7 @@ Abre `firmware\nodo_sensor\nodo_sensor.ino` y edita estas cuatro líneas:
 ```cpp
 const char* WIFI_SSID     = "nombre de tu red wifi";
 const char* WIFI_PASSWORD = "password de tu wifi";
-const char* BACKEND_BASE  = "https://privada.ochil.ddns.net";
+const char* BACKEND_BASE  = "http://privadaochil.ddns.net:8080";
 const char* DEVICE_TOKEN  = "TU_TOKEN";
 ```
 
@@ -309,7 +357,7 @@ Si el código es **201**, la cadena completa funciona de punta a punta.
 4. **Conteo final.** Confirma que hay diez registros o más:
 
 ```powershell
-curl.exe "https://privada.ochil.ddns.net/mediciones?vivienda_id=casa-001"
+curl.exe "http://privadaochil.ddns.net:8080/mediciones?vivienda_id=casa-001"
 ```
 
 5. **Video.** Graba de 30 a 60 segundos mostrando: el botón presionándose, el
@@ -320,18 +368,113 @@ números reales.
 
 ---
 
+---
+
+## Conexión de los sensores definitivos
+
+Reemplazan al push button provisional. Ambos son entradas digitales directas,
+sin resistencias externas.
+
+### Contacto magnético MC-38 (puerta o ventana)
+
+| ESP32 | MC-38 |
+|---|---|
+| GPIO 4 | un cable (cualquiera de los dos) |
+| GND | el otro cable |
+
+El MC-38 es un contacto seco sin polaridad, así que no importa cuál cable va a
+cada lado. El firmware activa la resistencia de elevación interna.
+
+La parte con cable se atornilla al marco y el imán a la puerta, separados por
+menos de 1 cm cuando está cerrada. Al abrirse el imán se aleja, el contacto se
+abre y el ESP32 lo lee como apertura.
+
+### Sensor de movimiento AM312
+
+| ESP32 | AM312 |
+|---|---|
+| 3V3 | VCC |
+| GPIO 5 | OUT |
+| GND | GND |
+
+El AM312 entrega 3.3 V en su salida, por lo que se conecta directo sin divisor.
+No tiene potenciómetros de ajuste como el HC-SR501: su retardo es fijo de unos
+2 segundos y su sensibilidad no se modifica. Por eso el firmware agrega un
+bloqueo de 8 segundos entre eventos de movimiento, para no llenar el historial
+mientras alguien permanece en la habitación.
+
+Al encenderlo tarda entre 30 y 60 segundos en estabilizarse. Durante ese lapso
+puede reportar movimiento sin causa real. Espera ese tiempo antes de medir
+falsos positivos.
+
+### Salida audible
+
+Por ahora el GPIO 2 mueve el LED integrado. Para la bocina de 12 V hace falta el
+relevador o el transistor que todavía no se adquiere, más su fuente
+independiente. **No conectes la bocina directamente a un GPIO.**
+
+Cuando tengas el relevador:
+
+| ESP32 | Relevador |
+|---|---|
+| GPIO 2 | IN |
+| 5V o VIN | VCC |
+| GND | GND |
+
+La bocina se alimenta de la fuente de 12 V, pasando por los contactos del
+relevador. El ESP32 solo abre y cierra, nunca conduce los 12 V.
+
+---
+
+## Usar la aplicación
+
+La aplicación se sirve desde el mismo backend. Abre en cualquier teléfono:
+
+```
+http://privadaochil.ddns.net:8080/
+```
+
+No requiere instalación. Para que quede con ícono propio y a pantalla completa,
+en Android usa el menú del navegador y elige agregar a pantalla de inicio. En
+iPhone usa el botón de compartir de Safari y elige añadir a la pantalla de
+inicio.
+
+Para ver otra vivienda, agrega el parámetro al final:
+
+```
+http://privadaochil.ddns.net:8080/?vivienda=casa-002
+```
+
+La vivienda se crea sola la primera vez que se consulta, sin ningún alta previa.
+
+### Actualizar el despliegue tras estos cambios
+
+```bash
+cd ~/poc-alarma
+git pull
+cd deploy
+docker compose up -d --build
+```
+
+Las tablas nuevas se crean solas al arrancar. Los eventos que ya tenías se
+conservan.
+
 ## Problemas comunes
 
 | Síntoma | Causa | Solución |
 |---|---|---|
 | `curl` en PowerShell da error raro | `curl` es alias de otro comando | Usa `curl.exe` con extensión |
+| `unmatched close brace/bracket` | PowerShell se comió las comillas del JSON | Haz el POST desde el SSH, o antepón `--%` a los argumentos |
+| Responde una página HTML de 404 | La URL apunta a otro servicio | Revisa que sea `http://` y que lleve `:8080`. Con `https://` la petición va al puerto 443, donde está tu otro proyecto |
+| PowerShell muestra `>>` y no ejecuta | La línea quedó incompleta por las comillas | `Ctrl+C` para salir, y vuelve a intentar |
 | No compila, error en `JsonDocument` | ArduinoJson versión 6 | Instala la versión 7 |
 | `codigo=-1` en el monitor | URL con diagonal final, o el certificado aún no se emite | Quita la diagonal, espera un minuto |
 | `codigo=401` | El token del firmware no coincide con el del `.env` | Compara ambos carácter por carácter |
 | `codigo=404` | `BACKEND_BASE` mal escrito | Revisa que sea exactamente el dominio |
 | El ESP32 no aparece en Puerto | Falta driver USB, o el cable es solo de carga | Instala driver CP2102 o CH340, prueba otro cable |
 | No conecta al Wi-Fi | Red de 5 GHz | Usa la red de 2.4 GHz |
-| `alarma_caddy` en `Exited` | Puertos 80 o 443 ocupados | Ver la sección al final del paso 5 |
+| `port is already allocated` al levantar | El puerto 8080 está ocupado | Cambiarlo, ver el final del paso 5 |
+| Responde en el VPS pero no desde Windows | Firewall cerrado | `sudo ufw allow 8080/tcp`, y revisar el panel del proveedor |
 | `alarma_backend` reiniciándose | Contraseña de Postgres con caracteres raros | Usa solo letras y números en `.env` |
 
 ### Comandos útiles en el VPS 🐧

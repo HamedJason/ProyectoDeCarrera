@@ -39,6 +39,11 @@ services:
     build: ../backend
     container_name: alarma_backend
     restart: unless-stopped
+    # Se publica directamente en el puerto 8080 del servidor.
+    # Si ese puerto también estuviera ocupado, basta cambiar el número de la
+    # izquierda, por ejemplo "8090:3000", y ajustar la URL en el firmware.
+    ports:
+      - "8080:3000"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       # La base viaja por la red interna de Docker, que no sale del servidor,
@@ -52,26 +57,21 @@ services:
     networks:
       - alarma
 
-  caddy:
-    image: caddy:2-alpine
-    container_name: alarma_caddy
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - backend
-    networks:
-      - alarma
+# Nota sobre HTTPS.
+#
+# El servidor ya tiene otro proyecto ocupando los puertos 80 y 443, por lo que no
+# se incluye Caddy en este despliegue. Let's Encrypt valida el dominio a través
+# del puerto 80, así que no es posible emitir un certificado mientras ese puerto
+# esté en uso por otro servicio.
+#
+# La prueba de concepto opera entonces sobre HTTP, protegida por el token del
+# dispositivo. La actividad no exige cifrado en esta etapa y la estrategia de
+# seguridad se define en talleres posteriores. El archivo Caddyfile se conserva
+# en esta carpeta para cuando el puerto 80 quede disponible o se integre este
+# servicio al servidor web existente.
 
 volumes:
   datos_postgres:
-  caddy_data:
-  caddy_config:
 
 networks:
   alarma:

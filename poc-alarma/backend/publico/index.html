@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1B2631">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Alarma">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icono.png">
+<title>Seguridad residencial</title>
+<style>
+  :root {
+    --fondo: #0F1620;
+    --panel: #1A2430;
+    --panel-alto: #22303F;
+    --borde: #2E3D4E;
+    --texto: #E8EDF2;
+    --texto-tenue: #93A4B5;
+    --verde: #2ECC71;
+    --rojo: #E74C3C;
+    --ambar: #F39C12;
+    --azul: #3498DB;
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  body {
+    margin: 0;
+    background: var(--fondo);
+    color: var(--texto);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .envoltura { max-width: 520px; margin: 0 auto; padding: 16px 16px 40px; }
+
+  header { padding: 8px 0 18px; }
+  h1 { font-size: 20px; margin: 0; font-weight: 700; letter-spacing: -0.2px; }
+  .subtitulo { font-size: 13px; color: var(--texto-tenue); margin-top: 3px; }
+
+  /* ---- Aviso de comunicación ---- */
+  #aviso {
+    display: none;
+    background: #3B1F1C;
+    border: 1px solid #7A3A32;
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  #aviso.visible { display: block; }
+  #aviso button {
+    margin-top: 8px; background: none; border: none; padding: 0;
+    color: var(--rojo); font-weight: 700; font-size: 13px; cursor: pointer;
+  }
+
+  /* ---- Tarjeta de estado ---- */
+  .estado {
+    border-radius: 16px;
+    padding: 22px 20px;
+    margin-bottom: 14px;
+    border: 1px solid var(--borde);
+    background: var(--panel);
+    transition: background .25s, border-color .25s;
+  }
+  .estado.armado { background: #16301F; border-color: #2F6B45; }
+  .estado.desarmado { background: var(--panel); }
+
+  .etiqueta {
+    font-size: 11px; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--texto-tenue); margin-bottom: 8px;
+  }
+  .estado-texto { font-size: 30px; font-weight: 800; letter-spacing: -0.5px; }
+  .estado-desde { font-size: 13px; color: var(--texto-tenue); margin-top: 6px; }
+
+  /* ---- Botones ---- */
+  .boton {
+    width: 100%; border: none; border-radius: 12px;
+    padding: 16px; font-size: 16px; font-weight: 700;
+    color: #fff; cursor: pointer; margin-top: 14px;
+    font-family: inherit; transition: opacity .15s, transform .08s;
+  }
+  .boton:active { transform: scale(.985); }
+  .boton:disabled { opacity: .5; cursor: default; }
+  .boton.armar { background: var(--verde); color: #08210F; }
+  .boton.desarmar { background: var(--panel-alto); border: 1px solid var(--borde); color: var(--texto); }
+  .boton.sirena { background: var(--rojo); }
+  .boton.sirena.activa { background: var(--ambar); color: #2B1A00; }
+
+  /* ---- Interruptor de modo silencioso ---- */
+  .fila-opcion {
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--panel); border: 1px solid var(--borde);
+    border-radius: 12px; padding: 14px 16px; margin-bottom: 14px;
+  }
+  .fila-opcion .titulo { font-size: 15px; font-weight: 600; }
+  .fila-opcion .nota { font-size: 12px; color: var(--texto-tenue); margin-top: 2px; }
+  .interruptor {
+    position: relative; width: 50px; height: 30px; flex-shrink: 0;
+    background: var(--panel-alto); border: 1px solid var(--borde);
+    border-radius: 999px; cursor: pointer; transition: background .2s;
+  }
+  .interruptor.activo { background: var(--azul); border-color: var(--azul); }
+  .interruptor::after {
+    content: ""; position: absolute; top: 3px; left: 3px;
+    width: 22px; height: 22px; border-radius: 50%; background: #fff;
+    transition: transform .2s;
+  }
+  .interruptor.activo::after { transform: translateX(20px); }
+
+  /* ---- Último evento ---- */
+  .tarjeta {
+    background: var(--panel); border: 1px solid var(--borde);
+    border-radius: 14px; padding: 18px; margin-bottom: 14px;
+  }
+  .valor-grande { font-size: 26px; font-weight: 800; margin-top: 4px; }
+  .valor-grande.abierta { color: var(--rojo); }
+  .valor-grande.cerrada { color: var(--verde); }
+  .valor-grande.movimiento { color: var(--ambar); }
+  /* pre-line conserva el salto de línea del texto, para separar la fecha
+     de la identificación del sensor en dos renglones */
+  .detalle { font-size: 13px; color: var(--texto-tenue); margin-top: 6px; line-height: 1.5; white-space: pre-line; }
+
+  /* ---- Historial ---- */
+  h2 {
+    font-size: 13px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--texto-tenue); margin: 24px 0 10px; font-weight: 700;
+  }
+  .evento {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--panel); border: 1px solid var(--borde);
+    border-radius: 10px; padding: 12px 14px; margin-bottom: 8px;
+  }
+  .punto { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .evento .cuerpo { flex: 1; min-width: 0; }
+  .evento .principal { font-size: 15px; font-weight: 600; }
+  .evento .secundario { font-size: 12px; color: var(--texto-tenue); margin-top: 2px; }
+  .evento .num { font-size: 11px; color: #64748B; flex-shrink: 0; }
+
+  .vacio, .cargando {
+    text-align: center; color: var(--texto-tenue);
+    font-size: 14px; padding: 32px 16px; line-height: 1.6;
+  }
+
+  .pie {
+    text-align: center; font-size: 11px; color: #5A6B7C;
+    margin-top: 28px; line-height: 1.7;
+  }
+  .punto-vivo {
+    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--verde); margin-right: 5px; vertical-align: middle;
+  }
+  .punto-vivo.muerto { background: var(--rojo); }
+</style>
+</head>
+<body>
+<div class="envoltura">
+
+  <header>
+    <h1>Seguridad residencial</h1>
+    <div class="subtitulo" id="encabezado-vivienda">Cargando...</div>
+  </header>
+
+  <div id="aviso">
+    <div id="aviso-texto"></div>
+    <button onclick="refrescar(true)">Reintentar</button>
+  </div>
+
+  <div class="estado desarmado" id="tarjeta-estado">
+    <div class="etiqueta">Estado del sistema</div>
+    <div class="estado-texto" id="estado-texto">--</div>
+    <div class="estado-desde" id="estado-desde"></div>
+    <button class="boton armar" id="boton-armado" onclick="alternarArmado()">Armar</button>
+  </div>
+
+  <div class="fila-opcion">
+    <div>
+      <div class="titulo">Modo silencioso</div>
+      <div class="nota">Registra y notifica sin activar la sirena</div>
+    </div>
+    <div class="interruptor" id="interruptor-silencio" onclick="alternarSilencio()"></div>
+  </div>
+
+  <div class="tarjeta">
+    <div class="etiqueta">Último evento</div>
+    <div class="valor-grande" id="ultimo-valor">--</div>
+    <div class="detalle" id="ultimo-detalle">Sin registros todavía</div>
+  </div>
+
+  <button class="boton sirena" id="boton-sirena" onclick="alternarSirena()">Probar sirena</button>
+
+  <h2>Historial <span id="conteo"></span></h2>
+  <div id="lista"><div class="cargando">Consultando el servidor...</div></div>
+
+  <div class="pie">
+    <span class="punto-vivo" id="punto-vivo"></span><span id="pie-texto">Conectando</span><br>
+    Proyecto de Carrera · UABC FCQI
+  </div>
+
+</div>
+
+<script>
+// ===================== Configuración =====================
+// La aplicación se sirve desde el mismo backend, por lo que las peticiones
+// van al mismo origen y no requieren una URL absoluta.
+const VIVIENDA = new URLSearchParams(location.search).get('vivienda') || 'casa-001';
+const INTERVALO_MS = 4000;
+const TIEMPO_LIMITE_MS = 8000;
+
+let estado = { armado: false, modo_silencioso: false, actuador_activo: false };
+let ocupado = false;
+let fallosSeguidos = 0;
+
+// ===================== Utilidades =====================
+
+// fetch con tiempo límite, para distinguir una red caída de una espera larga
+async function pedir(ruta, opciones = {}) {
+  const control = new AbortController();
+  const reloj = setTimeout(() => control.abort(), TIEMPO_LIMITE_MS);
+  try {
+    const r = await fetch(ruta, { ...opciones, signal: control.signal });
+    if (!r.ok && r.status !== 404) throw new Error('El servidor respondió con código ' + r.status);
+    return r.status === 404 ? null : await r.json();
+  } finally {
+    clearTimeout(reloj);
+  }
+}
+
+function formatearFecha(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const hoy = new Date();
+  const mismoDia = d.toDateString() === hoy.toDateString();
+  const hora = d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  if (mismoDia) return 'Hoy ' + hora;
+  return d.toLocaleDateString('es-MX', { day: '2-digit', month: 'short' }) + ' ' + hora;
+}
+
+function hace(iso) {
+  if (!iso) return '';
+  const seg = Math.floor((Date.now() - new Date(iso)) / 1000);
+  if (seg < 60) return 'hace ' + seg + ' s';
+  if (seg < 3600) return 'hace ' + Math.floor(seg / 60) + ' min';
+  if (seg < 86400) return 'hace ' + Math.floor(seg / 3600) + ' h';
+  return 'hace ' + Math.floor(seg / 86400) + ' días';
+}
+
+// Traduce el valor numérico a algo que el usuario entienda
+function interpretar(m) {
+  if (!m) return { texto: '--', clase: '' };
+  if (m.variable === 'estado_puerta') {
+    return Number(m.valor) === 1
+      ? { texto: 'PUERTA ABIERTA', clase: 'abierta' }
+      : { texto: 'PUERTA CERRADA', clase: 'cerrada' };
+  }
+  if (m.variable === 'movimiento') {
+    return Number(m.valor) === 1
+      ? { texto: 'MOVIMIENTO', clase: 'movimiento' }
+      : { texto: 'SIN MOVIMIENTO', clase: 'cerrada' };
+  }
+  return { texto: m.valor + ' ' + (m.unidad || ''), clase: '' };
+}
+
+/*
+ * Traduce el fallo a un mensaje que el usuario pueda accionar.
+ * El navegador entrega textos internos en inglés como "Failed to fetch",
+ * que no dicen nada a quien usa la aplicación.
+ */
+function mensajeDeError(e) {
+  if (e.name === 'AbortError') {
+    return 'El servidor no respondió a tiempo. Revisa tu conexión a Internet.';
+  }
+  if (e instanceof TypeError) {
+    return 'No hay comunicación con el servidor. Puede estar apagado o sin conexión a Internet.';
+  }
+  return 'No se pudo completar la operación. ' + e.message;
+}
+
+function mostrarAviso(mensaje) {
+  const caja = document.getElementById('aviso');
+  document.getElementById('aviso-texto').textContent = mensaje;
+  caja.classList.add('visible');
+  document.getElementById('punto-vivo').classList.add('muerto');
+  document.getElementById('pie-texto').textContent = 'Sin conexión con el servidor';
+}
+
+function ocultarAviso() {
+  document.getElementById('aviso').classList.remove('visible');
+  document.getElementById('punto-vivo').classList.remove('muerto');
+}
+
+// ===================== Pintado =====================
+
+function pintarEstado() {
+  const tarjeta = document.getElementById('tarjeta-estado');
+  const texto = document.getElementById('estado-texto');
+  const boton = document.getElementById('boton-armado');
+
+  if (estado.armado) {
+    tarjeta.className = 'estado armado';
+    texto.textContent = 'ARMADO';
+    boton.textContent = 'Desarmar';
+    boton.className = 'boton desarmar';
+  } else {
+    tarjeta.className = 'estado desarmado';
+    texto.textContent = 'DESARMADO';
+    boton.textContent = 'Armar';
+    boton.className = 'boton armar';
+  }
+
+  document.getElementById('estado-desde').textContent =
+    estado.actualizado_en ? 'Desde ' + formatearFecha(estado.actualizado_en) : '';
+
+  document.getElementById('interruptor-silencio').className =
+    'interruptor' + (estado.modo_silencioso ? ' activo' : '');
+
+  const sirena = document.getElementById('boton-sirena');
+  sirena.textContent = estado.actuador_activo ? 'Apagar sirena' : 'Probar sirena';
+  sirena.className = 'boton sirena' + (estado.actuador_activo ? ' activa' : '');
+}
+
+function pintarEventos(mediciones) {
+  const lista = document.getElementById('lista');
+  document.getElementById('conteo').textContent = mediciones.length ? '(' + mediciones.length + ')' : '';
+
+  // Estado de ausencia de datos, distinto del de error
+  if (!mediciones.length) {
+    lista.innerHTML = '<div class="vacio">Todavía no hay eventos registrados.<br>Abre una puerta o pasa frente al sensor para generar el primero.</div>';
+    document.getElementById('ultimo-valor').textContent = '--';
+    document.getElementById('ultimo-valor').className = 'valor-grande';
+    document.getElementById('ultimo-detalle').textContent = 'Sin registros todavía';
+    return;
+  }
+
+  const ultima = mediciones[0];
+  const interp = interpretar(ultima);
+  document.getElementById('ultimo-valor').textContent = interp.texto;
+  document.getElementById('ultimo-valor').className = 'valor-grande ' + interp.clase;
+  document.getElementById('ultimo-detalle').textContent =
+    formatearFecha(ultima.creado_en) + ' · ' + hace(ultima.creado_en) + '\n' +
+    (ultima.zona || 'sin zona') + ' · ' + ultima.nodo_id + ' · registro ' + (ultima.numero_registro ?? '-');
+
+  lista.innerHTML = mediciones.map(m => {
+    const i = interpretar(m);
+    const color = i.clase === 'abierta' ? 'var(--rojo)'
+                : i.clase === 'movimiento' ? 'var(--ambar)' : 'var(--verde)';
+    return '<div class="evento">' +
+      '<div class="punto" style="background:' + color + '"></div>' +
+      '<div class="cuerpo">' +
+        '<div class="principal">' + i.texto + '</div>' +
+        '<div class="secundario">' + formatearFecha(m.creado_en) + ' · ' + (m.zona || 'sin zona') + '</div>' +
+      '</div>' +
+      '<div class="num">#' + (m.numero_registro ?? m.id) + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+// ===================== Comunicación =====================
+
+async function refrescar(manual = false) {
+  try {
+    const [est, med] = await Promise.all([
+      pedir('/estado?vivienda_id=' + encodeURIComponent(VIVIENDA)),
+      pedir('/mediciones?vivienda_id=' + encodeURIComponent(VIVIENDA) + '&limite=40')
+    ]);
+
+    if (est) { estado = est; pintarEstado(); }
+    pintarEventos(med && med.mediciones ? med.mediciones : []);
+
+    fallosSeguidos = 0;
+    ocultarAviso();
+    document.getElementById('pie-texto').textContent = 'Actualizado ' + formatearFecha(new Date().toISOString());
+    document.getElementById('encabezado-vivienda').textContent = 'Vivienda ' + VIVIENDA;
+  } catch (e) {
+    fallosSeguidos++;
+    // Se avisa al segundo fallo, para no alarmar por un parpadeo de la red
+    if (manual || fallosSeguidos >= 2) mostrarAviso(mensajeDeError(e));
+  }
+}
+
+async function cambiarEstado(cambios) {
+  if (ocupado) return;
+  ocupado = true;
+  document.getElementById('boton-armado').disabled = true;
+  try {
+    const r = await pedir('/estado', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vivienda_id: VIVIENDA, usuario: 'residente', ...cambios })
+    });
+    if (r) { estado = r; pintarEstado(); ocultarAviso(); }
+  } catch (e) {
+    mostrarAviso(mensajeDeError(e));
+  } finally {
+    ocupado = false;
+    document.getElementById('boton-armado').disabled = false;
+  }
+}
+
+const alternarArmado  = () => cambiarEstado({ armado: !estado.armado });
+const alternarSilencio = () => cambiarEstado({ modo_silencioso: !estado.modo_silencioso });
+const alternarSirena   = () => cambiarEstado({ actuador_activo: !estado.actuador_activo });
+
+// ===================== Arranque =====================
+refrescar();
+setInterval(refrescar, INTERVALO_MS);
+
+// Al volver a la aplicación tras dejarla en segundo plano, actualizar de inmediato
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refrescar();
+});
+</script>
+</body>
+</html>

@@ -1,13 +1,13 @@
 -- Proyecto de Carrera - Sistema escalable de seguridad residencial
--- Taller 5: estructura inicial de la base de datos
+-- Estructura de la base de datos
 --
--- Esta es la version minima requerida por la prueba de concepto. El modelo
--- completo de viviendas, zonas, nodos, sensores, usuarios y evidencia
--- fotografica se desarrolla en talleres posteriores. Aqui se conservan los
--- campos vivienda_id, zona, nodo_id y sensor_id como texto para no adelantar
--- el diseno relacional definitivo, pero manteniendo desde ahora la jerarquia
--- que caracteriza al proyecto.
+-- Los campos vivienda_id, zona, nodo_id y sensor_id se conservan como texto
+-- para no adelantar el diseno relacional definitivo, pero manteniendo desde
+-- ahora la jerarquia que caracteriza al proyecto.
 
+-- ============================================================
+-- Eventos registrados por los sensores
+-- ============================================================
 CREATE TABLE IF NOT EXISTS mediciones (
     id               SERIAL PRIMARY KEY,
     vivienda_id      TEXT        NOT NULL,
@@ -25,3 +25,38 @@ CREATE TABLE IF NOT EXISTS mediciones (
 -- mas recientes de una vivienda.
 CREATE INDEX IF NOT EXISTS idx_mediciones_vivienda_fecha
     ON mediciones (vivienda_id, creado_en DESC);
+
+-- ============================================================
+-- Estado de armado de cada vivienda (RF-11 y RF-13)
+-- ============================================================
+-- Se persiste en la base de datos y no en memoria, para que el estado
+-- sobreviva a un reinicio del servicio. Si el concentrador se reinicia,
+-- recupera de aqui si la vivienda quedo armada.
+CREATE TABLE IF NOT EXISTS estado_vivienda (
+    vivienda_id      TEXT        PRIMARY KEY,
+    armado           BOOLEAN     NOT NULL DEFAULT FALSE,
+    modo_silencioso  BOOLEAN     NOT NULL DEFAULT FALSE,
+    -- Activacion manual de la salida audible, independiente del armado.
+    -- Sirve para probar la sirena sin tener que generar un evento real.
+    actuador_activo  BOOLEAN     NOT NULL DEFAULT FALSE,
+    actualizado_en   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ============================================================
+-- Bitacora de acciones del usuario (RNF-11, trazabilidad)
+-- ============================================================
+-- Conserva quien realizo cada accion sobre el sistema y en que momento.
+-- El campo usuario es texto porque la gestion de cuentas se define en un
+-- taller posterior. Mientras tanto identifica el origen de la accion.
+CREATE TABLE IF NOT EXISTS acciones (
+    id             SERIAL PRIMARY KEY,
+    vivienda_id    TEXT        NOT NULL,
+    accion         TEXT        NOT NULL,
+    valor_anterior TEXT,
+    valor_nuevo    TEXT,
+    usuario        TEXT        NOT NULL DEFAULT 'residente',
+    creado_en      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_acciones_vivienda_fecha
+    ON acciones (vivienda_id, creado_en DESC);

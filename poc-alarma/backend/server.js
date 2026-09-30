@@ -14,6 +14,7 @@
 
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const { pool, inicializarEsquema } = require('./db');
 
 const app = express();
@@ -209,46 +210,193 @@ app.get('/mediciones/ultima', async (req, res) => {
   }
 });
 
-// ===================== Control del actuador =====================
+// ===================== Estado de la vivienda =====================
 
 /*
- * Estado del actuador en memoria.
- * Para la prueba de concepto no se persiste, porque lo que se demuestra es el
- * camino frontend -> backend -> dispositivo, no la durabilidad del comando.
- * En el prototipo alfa este estado se mueve a la base de datos.
+ * Devuelve el estado de una vivienda, creandolo con valores por omision la
+ * primera vez que se consulta. De esta forma una vivienda nueva no requiere
+ * ningun alta previa, lo que sostiene el requisito de escalabilidad por
+ * configuracion: basta con que un nodo empiece a reportar con su identificador.
  */
-const estadoActuador = {};   // { [vivienda_id]: boolean }
+async function obtenerEstado(viviendaId) {
+  const r = await pool.query(
+    `INSERT INTO estado_vivienda (vivienda_id)
+     VALUES ($1)
+     ON CONFLICT (vivienda_id) DO UPDATE SET vivienda_id = EXCLUDED.vivienda_id
+     RETURNING vivienda_id, armado, modo_silencioso, actuador_activo, actualizado_en`,
+    [viviendaId]
+  );
+  return r.rows[0];
+}
 
-// El ESP32 consulta este endpoint periodicamente
-app.get('/comando', (req, res) => {
+/*
+ * Registra una accion del usuario sobre el sistema.
+ * Responde al requisito de trazabilidad: permite saber quien cambio que y cuando.
+ */
+async function registrarAccion(viviendaId, accion, anterior, nuevo, usuario) {
+  await pool.query(
+    `INSERT INTO acciones (vivienda_id, accion, valor_anterior, valor_nuevo, usuario)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [viviendaId, accion, String(anterior), String(nuevo), usuario || 'residente']
+  );
+}
+
+/*
+ * GET /estado
+ * Lo consultan tanto el concentrador como la aplicacion.
+ * El concentrador lo usa para decidir si un evento debe disparar la sirena.
+ */
+app.get('/estado', async (req, res) => {
   const viviendaId = req.query.vivienda_id || 'casa-001';
-  res.json({
-    ok: true,
-    vivienda_id: viviendaId,
-    actuador_activo: Boolean(estadoActuador[viviendaId])
-  });
+  try {
+    const estado = await obtenerEstado(viviendaId);
+    return res.json({ ok: true, ...estado });
+  } catch (e) {
+    return res.status(500).json({ ok: false, mensaje: 'No se pudo consultar el estado.', detalle: e.message });
+  }
 });
 
-// El frontend escribe en este endpoint
-app.post('/comando', (req, res) => {
-  const { vivienda_id, actuador_activo } = req.body || {};
+/*
+ * POST /estado
+ * La aplicacion cambia el armado, el modo silencioso o la salida audible.
+ * Se aceptan cambios parciales: lo que no venga en la peticion no se modifica.
+ */
+app.post('/estado', async (req, res) => {
+  const { vivienda_id, armado, modo_silencioso, actuador_activo, usuario } = req.body || {};
 
+  if (!vivienda_id) {
+    return res.status(400).json({ ok: false, mensaje: 'Falta el campo obligatorio "vivienda_id".' });
+  }
+
+  const campos = { armado, modo_silencioso, actuador_activo };
+  const errores = [];
+  for (const [nombre, valor] of Object.entries(campos)) {
+    if (valor !== undefined && typeof valor !== 'boolean') {
+      errores.push(`El campo "${nombre}" debe ser true o false.`);
+    }
+  }
+  if (Object.values(campos).every(v => v === undefined)) {
+    errores.push('Debe indicarse al menos uno de los campos "armado", "modo_silencioso" o "actuador_activo".');
+  }
+  if (errores.length > 0) {
+    return res.status(400).json({ ok: false, mensaje: 'La solicitud es incorrecta.', errores });
+  }
+
+  try {
+    const previo = await obtenerEstado(vivienda_id);
+
+    const nuevoArmado = armado !== undefined ? armado : previo.armado;
+    const nuevoSilencio = modo_silencioso !== undefined ? modo_silencioso : previo.modo_silencioso;
+    const nuevoActuador = actuador_activo !== undefined ? actuador_activo : previo.actuador_activo;
+
+    const r = await pool.query(
+      `UPDATE estado_vivienda
+          SET armado = $2, modo_silencioso = $3, actuador_activo = $4, actualizado_en = NOW()
+        WHERE vivienda_id = $1
+        RETURNING vivienda_id, armado, modo_silencioso, actuador_activo, actualizado_en`,
+      [vivienda_id, nuevoArmado, nuevoSilencio, nuevoActuador]
+    );
+
+    // Solo se registran los cambios reales, no las confirmaciones del mismo valor
+    if (armado !== undefined && armado !== previo.armado) {
+      await registrarAccion(vivienda_id, armado ? 'armar' : 'desarmar', previo.armado, armado, usuario);
+    }
+    if (modo_silencioso !== undefined && modo_silencioso !== previo.modo_silencioso) {
+      await registrarAccion(vivienda_id, 'modo_silencioso', previo.modo_silencioso, modo_silencioso, usuario);
+    }
+    if (actuador_activo !== undefined && actuador_activo !== previo.actuador_activo) {
+      await registrarAccion(vivienda_id, 'salida_audible', previo.actuador_activo, actuador_activo, usuario);
+    }
+
+    console.log(`Estado actualizado: ${vivienda_id} -> armado=${nuevoArmado} silencioso=${nuevoSilencio} salida=${nuevoActuador}`);
+    return res.json({ ok: true, mensaje: 'Estado actualizado.', ...r.rows[0] });
+  } catch (e) {
+    return res.status(500).json({ ok: false, mensaje: 'No se pudo actualizar el estado.', detalle: e.message });
+  }
+});
+
+/*
+ * GET /acciones
+ * Bitacora de acciones del usuario, para la pantalla de historial.
+ */
+app.get('/acciones', async (req, res) => {
+  const viviendaId = req.query.vivienda_id || 'casa-001';
+  const limite = Math.min(Number(req.query.limite) || 30, 200);
+  try {
+    const r = await pool.query(
+      `SELECT id, vivienda_id, accion, valor_anterior, valor_nuevo, usuario, creado_en
+         FROM acciones
+        WHERE vivienda_id = $1
+        ORDER BY creado_en DESC
+        LIMIT $2`,
+      [viviendaId, limite]
+    );
+    return res.json({ ok: true, total: r.rowCount, acciones: r.rows });
+  } catch (e) {
+    return res.status(500).json({ ok: false, mensaje: 'No se pudieron consultar las acciones.', detalle: e.message });
+  }
+});
+
+// ===================== Compatibilidad =====================
+
+/*
+ * Los endpoints /comando se conservan porque el firmware de la prueba de
+ * concepto los utiliza. Ahora leen y escriben sobre la misma tabla de estado,
+ * de modo que no existan dos fuentes de verdad.
+ */
+app.get('/comando', async (req, res) => {
+  const viviendaId = req.query.vivienda_id || 'casa-001';
+  try {
+    const estado = await obtenerEstado(viviendaId);
+    return res.json({
+      ok: true,
+      vivienda_id: estado.vivienda_id,
+      actuador_activo: estado.actuador_activo
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, mensaje: 'Error al consultar.', detalle: e.message });
+  }
+});
+
+app.post('/comando', async (req, res) => {
+  const { vivienda_id, actuador_activo } = req.body || {};
   if (!vivienda_id) {
     return res.status(400).json({ ok: false, mensaje: 'Falta el campo obligatorio "vivienda_id".' });
   }
   if (typeof actuador_activo !== 'boolean') {
     return res.status(400).json({ ok: false, mensaje: 'El campo "actuador_activo" debe ser true o false.' });
   }
+  try {
+    const previo = await obtenerEstado(vivienda_id);
+    await pool.query(
+      `UPDATE estado_vivienda SET actuador_activo = $2, actualizado_en = NOW() WHERE vivienda_id = $1`,
+      [vivienda_id, actuador_activo]
+    );
+    if (actuador_activo !== previo.actuador_activo) {
+      await registrarAccion(vivienda_id, 'salida_audible', previo.actuador_activo, actuador_activo, 'residente');
+    }
+    return res.json({
+      ok: true,
+      mensaje: 'Comando aplicado. El nodo lo tomara en su siguiente consulta.',
+      vivienda_id,
+      actuador_activo
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, mensaje: 'Error al aplicar el comando.', detalle: e.message });
+  }
+});
 
-  estadoActuador[vivienda_id] = actuador_activo;
-  console.log(`Comando recibido: ${vivienda_id} -> actuador ${actuador_activo ? 'ENCENDIDO' : 'APAGADO'}`);
+// ===================== Frontend =====================
 
-  return res.json({
-    ok: true,
-    mensaje: `Comando aplicado. El nodo lo tomara en su siguiente consulta.`,
-    vivienda_id,
-    actuador_activo
-  });
+/*
+ * La aplicacion se sirve desde el mismo servicio que la API.
+ * Esto evita configurar un despliegue aparte y hace que el origen sea el mismo,
+ * por lo que el navegador no necesita permisos adicionales entre ambos.
+ */
+app.use(express.static(path.join(__dirname, 'publico')));
+
+app.get('/', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'publico', 'index.html'));
 });
 
 // ===================== Arranque =====================
