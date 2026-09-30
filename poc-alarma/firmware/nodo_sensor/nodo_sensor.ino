@@ -838,6 +838,9 @@ void loop() {
     }
   }
 
+  // ---- Eventos recibidos de los nodos perifericos por ESP-NOW ----
+  atenderRemotos();
+
   // ---- Red y sincronizacion, sin detener el ciclo ----
   atenderWiFi();
   if (WiFi.status() == WL_CONNECTED) intentarVaciarBuffer();
