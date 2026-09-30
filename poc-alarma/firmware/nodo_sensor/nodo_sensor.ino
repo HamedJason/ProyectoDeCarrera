@@ -7,9 +7,14 @@
  *                                                  -> consulta de estado
  *                                                  -> salida audible
  *
- * Entradas soportadas:
- *   - Contacto magnetico MC-38 en una puerta o ventana (contacto seco)
- *   - Sensor infrarrojo pasivo AM312 para movimiento
+ * Entradas soportadas (varias de cada una, se declaran en las tablas de abajo):
+ *   - Contactos magneticos MC-38 en puertas o ventanas (contacto seco)
+ *   - Sensores infrarrojos pasivos AM312 para movimiento
+ *
+ * El nodo no sabe si un contacto esta en una puerta o en una ventana: solo
+ * reporta abierto/cerrado con un identificador. El residente decide el tipo y
+ * el nombre desde la aplicacion, que registra cada sensor la primera vez que
+ * reporta.
  *
  * El AM312 opera entre 2.7 y 12 V y entrega 3.3 V en su salida, por lo que se
  * conecta directamente al ESP32 sin divisor de voltaje. A diferencia del
@@ -48,16 +53,53 @@ const char* NODO_ID     = "nodo-01";
 
 // ===================== Hardware =====================
 
-const int PIN_PUERTA = 4;   // contacto MC-38, con resistencia pull-up interna
-// El AM312 va en el GPIO 18. El GPIO 5 se probo primero y daba lecturas falsas
-// porque es un pin de arranque (strapping) del ESP32, con pull-up interno activo
-// al encender. Los pines 4 y 18 no tienen esa funcion.
-const int PIN_PIR    = 18;  // salida del AM312, activa en alto
 const int PIN_SALIDA = 2;   // LED integrado o entrada del relevador de la sirena
 
-// Para usar solo uno de los dos sensores, poner el otro en false
-const bool USAR_PUERTA = true;
-const bool USAR_PIR    = true;
+/*
+ * Contactos magneticos MC-38. Un cable al pin y el otro a GND; el pull-up
+ * interno hace el resto. Pines recomendados: 4, 16, 17, 21, 22, 23.
+ * Evitar 0, 2, 5, 12, 15 (arranque) y 34-39 (no tienen pull-up interno).
+ *
+ * "sensorId" es el identificador que veran el backend y la aplicacion. No lo
+ * cambies despues de registrarlo o se creara como un sensor nuevo.
+ * "zona" es solo el lugar; el nombre y el tipo se ponen en la aplicacion.
+ * Cada tabla debe tener al menos un sensor (un arreglo vacio no compila).
+ */
+struct Contacto {
+  const char* sensorId;
+  const char* zona;
+  int pin;
+  int estable;             // estado ya filtrado
+  int previa;              // ultima lectura cruda
+  unsigned long tCambio;
+};
+
+Contacto contactos[] = {
+  { "sensor-puerta-01", "entrada", 4, HIGH, HIGH, 0 },
+  // { "contacto-02", "sala",     16, HIGH, HIGH, 0 },
+  // { "contacto-03", "cocina",   17, HIGH, HIGH, 0 },
+  // { "contacto-04", "recamara", 21, HIGH, HIGH, 0 },
+};
+const int NUM_CONTACTOS = sizeof(contactos) / sizeof(contactos[0]);
+
+/*
+ * Sensores de movimiento AM312. Alimentacion 3.3 V, GND y OUT al pin.
+ * Pines recomendados: 18, 19, 25, 26, 27. El GPIO 5 NO sirve: es un pin de
+ * arranque y da lecturas falsas.
+ */
+struct Pir {
+  const char* sensorId;
+  const char* zona;
+  int pin;
+  volatile bool pulso;     // lo levanta la interrupcion
+  unsigned long tUltimo;   // ultimo evento aceptado
+};
+
+Pir pirs[] = {
+  { "pir-sala-01", "sala", 18, false, 0 },
+  // { "pir-02", "pasillo", 19, false, 0 },
+};
+const int NUM_PIRS = sizeof(pirs) / sizeof(pirs[0]);
 
 // ===================== Parametros de procesamiento =====================
 
@@ -84,19 +126,16 @@ const unsigned long INTERVALO_REPORTE_ALARMA_MS = 1000;
 
 // ===================== Estado interno =====================
 
-int  lecturaPuertaEstable = HIGH;
-int  lecturaPuertaPrevia  = HIGH;
-unsigned long tUltimoCambioPuerta = 0;
-
-unsigned long tUltimoEventoPir = 0;
 bool pirListo = false;   // true cuando termino el tiempo de estabilizacion
 
 // El AM312 mantiene su salida en alto solo unos 2 segundos. Si el programa esta
 // ocupado en una peticion HTTP (que puede tardar hasta 5 s con el servidor
 // caido), un sondeo podria perder el pulso por completo. Por eso el flanco de
 // subida se captura con una interrupcion, que no depende de lo que haga el ciclo.
-volatile bool pirPulso = false;
-void IRAM_ATTR alDetectarPir() { pirPulso = true; }
+// Cada interrupcion recibe como argumento el indice de su sensor en "pirs".
+void IRAM_ATTR alDetectarPir(void* arg) {
+  pirs[(int)(intptr_t)arg].pulso = true;
+}
 
 unsigned long tUltimoEstado = 0;
 unsigned long contadorRegistro = 0;
@@ -119,6 +158,7 @@ bool alarmaReportadaActiva = false;   // ultimo valor que el backend conoce
 bool alarmaConfirmada = false;        // el backend ya vio esta alarma como activa
 char motivoAlarma[20] = "";           // variable que disparo la alarma, para el aviso
 char zonaAlarma[20]   = "";
+char sensorAlarma[24] = "";           // sensor que disparo, para resaltarlo en la app
 unsigned long tUltimoReporteAlarma = 0;
 
 bool wifiEstabaConectado = false;
@@ -290,13 +330,16 @@ void procesarEvento(const char* variable, const char* zona,
   Serial.print(" valor=");
   Serial.print(valor);
   Serial.print(" zona=");
-  Serial.println(zona);
+  Serial.print(zona);
+  Serial.print(" sensor=");
+  Serial.println(sensorId);
 
   if (esAlarma && sistemaArmado) {
     if (modoSilencioso) {
       Serial.println("   ALARMA en modo silencioso. Se registra y se notifica sin activar la salida.");
       strncpy(motivoAlarma, variable, sizeof(motivoAlarma) - 1); motivoAlarma[sizeof(motivoAlarma) - 1] = '\0';
       strncpy(zonaAlarma, zona, sizeof(zonaAlarma) - 1);         zonaAlarma[sizeof(zonaAlarma) - 1] = '\0';
+      strncpy(sensorAlarma, sensorId, sizeof(sensorAlarma) - 1); sensorAlarma[sizeof(sensorAlarma) - 1] = '\0';
       // Un solo intento. El evento ya queda registrado como medicion, y este
       // aviso solo sirve para la notificacion.
       enviarAlarma(true, true);
@@ -309,6 +352,7 @@ void procesarEvento(const char* variable, const char* zona,
       }
       strncpy(motivoAlarma, variable, sizeof(motivoAlarma) - 1); motivoAlarma[sizeof(motivoAlarma) - 1] = '\0';
       strncpy(zonaAlarma, zona, sizeof(zonaAlarma) - 1);         zonaAlarma[sizeof(zonaAlarma) - 1] = '\0';
+      strncpy(sensorAlarma, sensorId, sizeof(sensorAlarma) - 1); sensorAlarma[sizeof(sensorAlarma) - 1] = '\0';
       sirenaPorAlarma = true;
       tInicioSirena = millis();
     }
@@ -362,6 +406,7 @@ bool enviarAlarma(bool activa, bool silenciosa) {
   if (activa) {
     doc["motivo"]    = motivoAlarma;
     doc["zona"]      = zonaAlarma;
+    doc["sensor_id"] = sensorAlarma;
     doc["silenciosa"] = silenciosa;
   }
   String cuerpo;
@@ -476,16 +521,20 @@ void setup() {
   Serial.begin(115200);
   delay(300);
 
-  if (USAR_PUERTA) pinMode(PIN_PUERTA, INPUT_PULLUP);
+  for (int i = 0; i < NUM_CONTACTOS; i++) {
+    pinMode(contactos[i].pin, INPUT_PULLUP);
+  }
   // Pull-down interno: si el cable del sensor se desconecta, la lectura es 0
   // y no un valor flotante que dispare eventos falsos.
-  if (USAR_PIR)    pinMode(PIN_PIR, INPUT_PULLDOWN);
+  for (int i = 0; i < NUM_PIRS; i++) {
+    pinMode(pirs[i].pin, INPUT_PULLDOWN);
+  }
   pinMode(PIN_SALIDA, OUTPUT);
   digitalWrite(PIN_SALIDA, LOW);
 
-  if (USAR_PUERTA) {
-    lecturaPuertaEstable = digitalRead(PIN_PUERTA);
-    lecturaPuertaPrevia  = lecturaPuertaEstable;
+  for (int i = 0; i < NUM_CONTACTOS; i++) {
+    contactos[i].estable = digitalRead(contactos[i].pin);
+    contactos[i].previa  = contactos[i].estable;
   }
 
   Serial.println();
@@ -494,13 +543,21 @@ void setup() {
   Serial.print(" Vivienda: "); Serial.println(VIVIENDA_ID);
   Serial.print(" Nodo:     "); Serial.println(NODO_ID);
   Serial.print(" Sensores: ");
-  if (USAR_PUERTA) { Serial.print("puerta (GPIO "); Serial.print(PIN_PUERTA); Serial.print(") "); }
-  if (USAR_PIR)    { Serial.print("movimiento (GPIO "); Serial.print(PIN_PIR); Serial.print(")"); }
   Serial.println();
+  for (int i = 0; i < NUM_CONTACTOS; i++) {
+    Serial.print("   contacto  "); Serial.print(contactos[i].sensorId);
+    Serial.print(" (GPIO "); Serial.print(contactos[i].pin); Serial.print(", ");
+    Serial.print(contactos[i].zona); Serial.println(")");
+  }
+  for (int i = 0; i < NUM_PIRS; i++) {
+    Serial.print("   movimiento "); Serial.print(pirs[i].sensorId);
+    Serial.print(" (GPIO "); Serial.print(pirs[i].pin); Serial.print(", ");
+    Serial.print(pirs[i].zona); Serial.println(")");
+  }
   Serial.println("==========================================");
 
   // El AM312 necesita estabilizarse tras el encendido antes de ser fiable
-  if (USAR_PIR) {
+  if (NUM_PIRS > 0) {
     Serial.print("[PIR] Estabilizando el sensor durante ");
     Serial.print(PIR_ESTABILIZACION_MS / 1000);
     Serial.println(" s. Sus lecturas se ignoran hasta entonces.");
@@ -510,49 +567,60 @@ void setup() {
 }
 
 void loop() {
-  // ---- Contacto magnetico, con filtrado de rebote ----
-  if (USAR_PUERTA) {
-    int lectura = digitalRead(PIN_PUERTA);
+  // ---- Contactos magneticos, con filtrado de rebote ----
+  for (int i = 0; i < NUM_CONTACTOS; i++) {
+    Contacto &c = contactos[i];
+    int lectura = digitalRead(c.pin);
 
-    if (lectura != lecturaPuertaPrevia) {
-      tUltimoCambioPuerta = millis();
-      lecturaPuertaPrevia = lectura;
+    if (lectura != c.previa) {
+      c.tCambio = millis();
+      c.previa = lectura;
     }
 
-    if ((millis() - tUltimoCambioPuerta) > DEBOUNCE_MS && lectura != lecturaPuertaEstable) {
-      lecturaPuertaEstable = lectura;
+    if ((millis() - c.tCambio) > DEBOUNCE_MS && lectura != c.estable) {
+      c.estable = lectura;
       // Con pull-up: circuito abierto significa que el iman se separo, o sea
-      // que la puerta se abrio. Esa es la condicion de alarma.
-      int valor = (lecturaPuertaEstable == HIGH) ? 1 : 0;
-      procesarEvento("estado_puerta", "entrada", "sensor-puerta-01", valor, valor == 1);
+      // que la puerta o ventana se abrio. Esa es la condicion de alarma.
+      int valor = (c.estable == HIGH) ? 1 : 0;
+      procesarEvento("estado_puerta", c.zona, c.sensorId, valor, valor == 1);
     }
   }
 
-  // ---- Sensor de movimiento ----
-  if (USAR_PIR) {
+  // ---- Sensores de movimiento ----
+  if (NUM_PIRS > 0) {
     if (!pirListo) {
-      // Se ignora durante la estabilizacion. La interrupcion se activa hasta
+      // Se ignora durante la estabilizacion. Las interrupciones se activan hasta
       // que termina, para que el arranque del sensor no cuente como evento.
       if (millis() >= PIR_ESTABILIZACION_MS) {
         pirListo = true;
-        pirPulso = false;
-        attachInterrupt(digitalPinToInterrupt(PIN_PIR), alDetectarPir, RISING);
-        Serial.print("[PIR] Listo en GPIO ");
-        Serial.print(PIN_PIR);
-        Serial.print(". Lectura inicial: ");
-        Serial.println(digitalRead(PIN_PIR));
+        for (int i = 0; i < NUM_PIRS; i++) {
+          pirs[i].pulso = false;
+          attachInterruptArg(digitalPinToInterrupt(pirs[i].pin), alDetectarPir,
+                             (void*)(intptr_t)i, RISING);
+          Serial.print("[PIR] ");
+          Serial.print(pirs[i].sensorId);
+          Serial.print(" listo en GPIO ");
+          Serial.print(pirs[i].pin);
+          Serial.print(". Lectura inicial: ");
+          Serial.println(digitalRead(pirs[i].pin));
+        }
       }
-    } else if (pirPulso) {
-      pirPulso = false;
-      Serial.println("[PIR] Pulso detectado");
+    } else {
+      for (int i = 0; i < NUM_PIRS; i++) {
+        Pir &p = pirs[i];
+        if (!p.pulso) continue;
+        p.pulso = false;
+        Serial.print("[PIR] Pulso detectado en ");
+        Serial.println(p.sensorId);
 
-      // Bloqueo posterior para no inundar de eventos mientras alguien
-      // permanece en la habitacion
-      if (millis() - tUltimoEventoPir > BLOQUEO_PIR_MS) {
-        tUltimoEventoPir = millis();
-        procesarEvento("movimiento", "sala", "pir-sala-01", 1, true);
-      } else {
-        Serial.println("   Ignorado por el bloqueo entre eventos de movimiento.");
+        // Bloqueo posterior para no inundar de eventos mientras alguien
+        // permanece en la habitacion
+        if (p.tUltimo == 0 || millis() - p.tUltimo > BLOQUEO_PIR_MS) {
+          p.tUltimo = millis();
+          procesarEvento("movimiento", p.zona, p.sensorId, 1, true);
+        } else {
+          Serial.println("   Ignorado por el bloqueo entre eventos de movimiento.");
+        }
       }
     }
   }

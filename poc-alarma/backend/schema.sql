@@ -73,3 +73,25 @@ CREATE TABLE IF NOT EXISTS acciones (
 
 CREATE INDEX IF NOT EXISTS idx_acciones_vivienda_fecha
     ON acciones (vivienda_id, creado_en DESC);
+
+-- ============================================================
+-- Registro de sensores de cada vivienda
+-- ============================================================
+-- Permite tener muchas puertas, ventanas y detectores de movimiento. El nodo
+-- solo reporta contacto (estado_puerta) o movimiento; el residente decide en
+-- la aplicacion si un contacto es una puerta o una ventana.
+CREATE TABLE IF NOT EXISTS sensores (
+    id           SERIAL PRIMARY KEY,
+    vivienda_id  TEXT        NOT NULL,
+    sensor_id    TEXT        NOT NULL,
+    nodo_id      TEXT,
+    tipo         TEXT        NOT NULL CHECK (tipo IN ('puerta', 'ventana', 'movimiento')),
+    nombre       TEXT        NOT NULL,
+    zona         TEXT,
+    creado_en    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (vivienda_id, sensor_id)
+);
+
+-- Sensor que disparo la alarma en curso, para resaltarlo en la aplicacion.
+ALTER TABLE estado_vivienda
+    ADD COLUMN IF NOT EXISTS alarma_sensor TEXT;

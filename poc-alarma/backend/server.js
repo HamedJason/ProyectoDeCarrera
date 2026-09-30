@@ -140,6 +140,8 @@ app.post('/mediciones', async (req, res) => {
       numero_registro === null ? null : Number(numero_registro)
     ]);
 
+    await registrarSensorSiNuevo(vivienda_id, sensor_id, nodo_id, variable, zona);
+
     return res.status(201).json({
       ok: true,
       mensaje: 'Medicion registrada correctamente.',
@@ -220,6 +222,188 @@ app.get('/mediciones/ultima', async (req, res) => {
   }
 });
 
+
+// ===================== Sensores =====================
+
+const TIPOS_SENSOR = ['puerta', 'ventana', 'movimiento'];
+
+// Un contacto magnetico reporta "estado_puerta" y puede ser puerta o ventana;
+// un PIR reporta "movimiento" y solo puede ser detector de movimiento.
+function tipoPorVariable(variable) {
+  if (variable === 'estado_puerta') return 'puerta';
+  if (variable === 'movimiento') return 'movimiento';
+  return null;
+}
+
+function nombrePorOmision(tipo, zona) {
+  const lugar = zona ? ` de ${zona}` : '';
+  if (tipo === 'movimiento') return zona ? `Movimiento en ${zona}` : 'Movimiento';
+  return `${tipo === 'ventana' ? 'Ventana' : 'Puerta'}${lugar}`;
+}
+
+/*
+ * Da de alta un sensor la primera vez que reporta. La migracion desde las
+ * mediciones antiguas solo ocurre cuando la tabla esta vacia, para que un
+ * sensor eliminado por el residente no reaparezca por su historial.
+ */
+async function registrarSensorSiNuevo(viviendaId, sensorId, nodoId, variable, zona) {
+  const tipo = tipoPorVariable(variable);
+  if (!tipo) return;
+  await pool.query(
+    `INSERT INTO sensores (vivienda_id, sensor_id, nodo_id, tipo, nombre, zona)
+     SELECT $1::text, $2::text, $3::text, $4::text, $5::text, $6::text
+      WHERE NOT EXISTS (SELECT 1 FROM sensores WHERE vivienda_id = $1 AND sensor_id = $2)
+        AND NOT EXISTS (SELECT 1 FROM acciones WHERE vivienda_id = $1 AND accion = 'sensor_eliminado'
+                         AND valor_anterior = $2)
+     ON CONFLICT (vivienda_id, sensor_id) DO NOTHING`,
+    [viviendaId, sensorId, nodoId, tipo, nombrePorOmision(tipo, zona), zona || null]
+  );
+}
+
+async function migrarSensoresAntiguos() {
+  const hay = await pool.query('SELECT 1 FROM sensores LIMIT 1');
+  if (hay.rowCount > 0) return;
+  const r = await pool.query(
+    `SELECT DISTINCT ON (vivienda_id, sensor_id) vivienda_id, sensor_id, nodo_id, variable, zona
+       FROM mediciones
+      WHERE variable IN ('estado_puerta', 'movimiento')
+      ORDER BY vivienda_id, sensor_id, creado_en DESC`
+  );
+  for (const f of r.rows) {
+    await registrarSensorSiNuevo(f.vivienda_id, f.sensor_id, f.nodo_id, f.variable, f.zona);
+  }
+  if (r.rowCount) console.log(`Sensores migrados desde el historial: ${r.rowCount}`);
+}
+
+const CONSULTA_SENSORES = `
+  SELECT s.id, s.vivienda_id, s.sensor_id, s.nodo_id, s.tipo, s.nombre, s.zona, s.creado_en,
+         u.valor AS ultimo_valor, u.creado_en AS ultima_lectura, u.variable,
+         d.creado_en AS ultima_deteccion
+    FROM sensores s
+    LEFT JOIN LATERAL (
+      SELECT valor, creado_en, variable FROM mediciones m
+       WHERE m.vivienda_id = s.vivienda_id AND m.sensor_id = s.sensor_id
+       ORDER BY creado_en DESC LIMIT 1) u ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT creado_en FROM mediciones m
+       WHERE m.vivienda_id = s.vivienda_id AND m.sensor_id = s.sensor_id AND m.valor = 1
+       ORDER BY creado_en DESC LIMIT 1) d ON TRUE
+   WHERE s.vivienda_id = $1 ${'${extra}'}
+   ORDER BY s.tipo = 'movimiento', s.zona NULLS LAST, s.nombre, s.id`;
+
+async function listarSensores(viviendaId, sensorDbId) {
+  const sql = CONSULTA_SENSORES.replace('${extra}', sensorDbId ? 'AND s.id = $2' : '');
+  const r = await pool.query(sql, sensorDbId ? [viviendaId, sensorDbId] : [viviendaId]);
+  return r.rows;
+}
+
+function limpiarTexto(v, max) {
+  if (v === undefined || v === null) return null;
+  const t = String(v).trim().slice(0, max);
+  return t === '' ? null : t;
+}
+
+/*
+ * GET /sensores
+ * Lista los sensores de la vivienda con su ultimo valor y ultima deteccion.
+ */
+app.get('/sensores', async (req, res) => {
+  const viviendaId = req.query.vivienda_id || 'casa-001';
+  try {
+    const sensores = await listarSensores(viviendaId);
+    return res.json({ ok: true, total: sensores.length, sensores });
+  } catch (e) {
+    return res.status(500).json({ ok: false, mensaje: 'No se pudieron consultar los sensores.', detalle: e.message });
+  }
+});
+
+// Alta manual, por si el residente quiere nombrar un sensor antes de que reporte.
+app.post('/sensores', async (req, res) => {
+  const { vivienda_id, sensor_id, tipo, nombre, zona, usuario } = req.body || {};
+  const errores = [];
+  if (!vivienda_id) errores.push('Falta el campo obligatorio "vivienda_id".');
+  if (!limpiarTexto(sensor_id, 60)) errores.push('Falta el campo obligatorio "sensor_id".');
+  if (!TIPOS_SENSOR.includes(tipo)) errores.push('El campo "tipo" debe ser "puerta", "ventana" o "movimiento".');
+  if (errores.length) return res.status(400).json({ ok: false, mensaje: 'La solicitud es incorrecta.', errores });
+
+  const nombreFinal = limpiarTexto(nombre, 60) || nombrePorOmision(tipo, limpiarTexto(zona, 40));
+  try {
+    const r = await pool.query(
+      `INSERT INTO sensores (vivienda_id, sensor_id, tipo, nombre, zona)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (vivienda_id, sensor_id) DO NOTHING
+       RETURNING id`,
+      [vivienda_id, limpiarTexto(sensor_id, 60), tipo, nombreFinal, limpiarTexto(zona, 40)]
+    );
+    if (r.rowCount === 0) {
+      return res.status(409).json({ ok: false, mensaje: 'Ya existe un sensor con ese identificador.' });
+    }
+    await registrarAccion(vivienda_id, 'sensor_agregado', '', nombreFinal, usuario);
+    const [sensor] = await listarSensores(vivienda_id, r.rows[0].id);
+    return res.status(201).json({ ok: true, sensor });
+  } catch (e) {
+    return res.status(500).json({ ok: false, mensaje: 'No se pudo agregar el sensor.', detalle: e.message });
+  }
+});
+
+app.patch('/sensores/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ ok: false, mensaje: 'Identificador invalido.' });
+  const { tipo, nombre, zona, usuario } = req.body || {};
+  if (tipo !== undefined && !TIPOS_SENSOR.includes(tipo)) {
+    return res.status(400).json({ ok: false, mensaje: 'El campo "tipo" debe ser "puerta", "ventana" o "movimiento".' });
+  }
+  try {
+    const a = await pool.query('SELECT * FROM sensores WHERE id = $1', [id]);
+    if (a.rowCount === 0) return res.status(404).json({ ok: false, mensaje: 'Sensor no encontrado.' });
+    const previo = a.rows[0];
+
+    // Un contacto solo puede ser puerta o ventana, y un PIR solo movimiento.
+    if (tipo !== undefined && tipo !== previo.tipo) {
+      const ult = await pool.query(
+        `SELECT variable FROM mediciones WHERE vivienda_id = $1 AND sensor_id = $2
+          ORDER BY creado_en DESC LIMIT 1`, [previo.vivienda_id, previo.sensor_id]);
+      const variable = ult.rows[0] && ult.rows[0].variable;
+      const esContacto = variable === 'estado_puerta';
+      const esPir = variable === 'movimiento';
+      if ((esContacto && tipo === 'movimiento') || (esPir && tipo !== 'movimiento')) {
+        return res.status(400).json({
+          ok: false,
+          mensaje: esPir ? 'Este sensor reporta movimiento y no puede ser puerta o ventana.'
+                         : 'Este sensor es un contacto y solo puede ser puerta o ventana.'
+        });
+      }
+    }
+
+    const nuevoNombre = nombre !== undefined ? (limpiarTexto(nombre, 60) || previo.nombre) : previo.nombre;
+    const nuevaZona = zona !== undefined ? limpiarTexto(zona, 40) : previo.zona;
+    const nuevoTipo = tipo !== undefined ? tipo : previo.tipo;
+    await pool.query('UPDATE sensores SET nombre = $2, zona = $3, tipo = $4 WHERE id = $1',
+                     [id, nuevoNombre, nuevaZona, nuevoTipo]);
+    await registrarAccion(previo.vivienda_id, 'sensor_editado', previo.nombre, nuevoNombre, usuario);
+    const [sensor] = await listarSensores(previo.vivienda_id, id);
+    return res.json({ ok: true, sensor });
+  } catch (e) {
+    return res.status(500).json({ ok: false, mensaje: 'No se pudo editar el sensor.', detalle: e.message });
+  }
+});
+
+app.delete('/sensores/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ ok: false, mensaje: 'Identificador invalido.' });
+  try {
+    const r = await pool.query('DELETE FROM sensores WHERE id = $1 RETURNING vivienda_id, sensor_id, nombre', [id]);
+    if (r.rowCount === 0) return res.status(404).json({ ok: false, mensaje: 'Sensor no encontrado.' });
+    const f = r.rows[0];
+    // valor_anterior guarda el identificador para que el sensor no se vuelva a
+    // registrar solo si el nodo sigue reportandolo. Solo un alta manual lo revive.
+    await registrarAccion(f.vivienda_id, 'sensor_eliminado', f.sensor_id, f.nombre, req.body && req.body.usuario);
+    return res.json({ ok: true, mensaje: 'Sensor eliminado.' });
+  } catch (e) {
+    return res.status(500).json({ ok: false, mensaje: 'No se pudo eliminar el sensor.', detalle: e.message });
+  }
+});
+
 // ===================== Estado de la vivienda =====================
 
 /*
@@ -229,7 +413,7 @@ app.get('/mediciones/ultima', async (req, res) => {
  * configuracion: basta con que un nodo empiece a reportar con su identificador.
  */
 const COLUMNAS_ESTADO =
-  'vivienda_id, armado, modo_silencioso, actuador_activo, alarma_activa, alarma_motivo, actualizado_en';
+  'vivienda_id, armado, modo_silencioso, actuador_activo, alarma_activa, alarma_motivo, alarma_sensor, actualizado_en';
 
 async function obtenerEstado(viviendaId) {
   const r = await pool.query(
@@ -345,6 +529,7 @@ app.post('/estado', async (req, res) => {
           SET armado = $2, modo_silencioso = $3, actuador_activo = $4,
               alarma_activa = $5,
               alarma_motivo = CASE WHEN $5 THEN alarma_motivo ELSE NULL END,
+              alarma_sensor = CASE WHEN $5 THEN alarma_sensor ELSE NULL END,
               actualizado_en = NOW()
         WHERE vivienda_id = $1
         RETURNING ${COLUMNAS_ESTADO}`,
@@ -378,7 +563,7 @@ app.post('/estado', async (req, res) => {
  * Requiere el token del dispositivo, a diferencia de /estado, porque solo un
  * sensor debe poder declarar una alarma.
  *
- * Campos: vivienda_id, activa, y opcionalmente nodo_id, motivo (variable que
+ * Campos: vivienda_id, activa, y opcionalmente nodo_id, sensor_id, motivo (variable que
  * disparo, por ejemplo "estado_puerta"), zona y silenciosa.
  *
  * Con silenciosa = true el nodo dispara sin sirena por el modo silencioso: se
@@ -394,7 +579,7 @@ app.post('/alarma', async (req, res) => {
     return res.status(401).json({ ok: false, mensaje: 'Token de dispositivo invalido o ausente.' });
   }
 
-  const { vivienda_id, activa, nodo_id, motivo, zona, silenciosa } = req.body || {};
+  const { vivienda_id, activa, nodo_id, motivo, zona, silenciosa, sensor_id } = req.body || {};
   if (!vivienda_id) {
     return res.status(400).json({ ok: false, mensaje: 'Falta el campo obligatorio "vivienda_id".' });
   }
@@ -404,7 +589,15 @@ app.post('/alarma', async (req, res) => {
 
   try {
     const previo = await obtenerEstado(vivienda_id);
-    const texto = describirMotivo(motivo, zona);
+    let texto = describirMotivo(motivo, zona);
+    if (sensor_id) {
+      const sr = await pool.query('SELECT tipo, nombre FROM sensores WHERE vivienda_id = $1 AND sensor_id = $2',
+                                  [vivienda_id, sensor_id]);
+      if (sr.rowCount) {
+        const { tipo, nombre } = sr.rows[0];
+        texto = tipo === 'movimiento' ? `Movimiento detectado: ${nombre}` : `${nombre}: abierta`;
+      }
+    }
 
     if (activa && !previo.armado) {
       return res.json({ ok: true, aplicada: false, mensaje: 'El sistema no esta armado. No se marco la alarma.', ...previo });
@@ -420,10 +613,11 @@ app.post('/alarma', async (req, res) => {
       `UPDATE estado_vivienda
           SET alarma_activa = $2,
               alarma_motivo = CASE WHEN $2 THEN $3::text ELSE NULL END,
+              alarma_sensor = CASE WHEN $2 THEN $4::text ELSE NULL END,
               actualizado_en = NOW()
         WHERE vivienda_id = $1
         RETURNING ${COLUMNAS_ESTADO}`,
-      [vivienda_id, activa, texto]
+      [vivienda_id, activa, texto, sensor_id || null]
     );
 
     if (activa !== previo.alarma_activa) {
@@ -578,6 +772,7 @@ app.use((req, res) => {
 });
 
 inicializarEsquema()
+  .then(migrarSensoresAntiguos)
   .then(() => {
     app.listen(PUERTO, () => {
       console.log(`Backend escuchando en el puerto ${PUERTO}`);

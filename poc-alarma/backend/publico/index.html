@@ -14,11 +14,11 @@
 <style>
   /*
    * Identidad visual.
-   * La casa se dibuja como un plano en planta y el plano es la interfaz: los
-   * muros indican si el sistema esta armado, la hoja de la puerta se abre cuando
-   * el contacto magnetico se separa, y el cono del sensor se enciende cuando hay
-   * movimiento. El color tiene un solo significado por tono: pino para armado,
-   * ambar para actividad y rojo unicamente para una alarma.
+   * Cada sensor es una tarjeta con su propia ilustracion animada: las puertas y
+   * ventanas se ven de frente y se abren cuando el contacto magnetico se separa,
+   * el detector de movimiento emite ondas al detectar y la sirena gira su haz.
+   * El color tiene un solo significado por tono: pino para armado, ambar para
+   * actividad y rojo unicamente para una alarma.
    *
    * La tipografia (Bricolage Grotesque, licencia OFL) se sirve desde el propio
    * backend para que funcione sin Internet y sobre HTTP.
@@ -63,7 +63,7 @@
   button { font: inherit; color: inherit; }
   :focus-visible { outline: 3px solid var(--pino); outline-offset: 3px; }
 
-  .envoltura { max-width: 520px; margin: 0 auto; padding: 14px 16px 44px; }
+  .envoltura { max-width: 760px; margin: 0 auto; padding: 14px 16px 44px; }
   .columna { min-width: 0; }
 
   /* ---- Barra superior ---- */
@@ -115,56 +115,257 @@
   .escena.alarma .titular { color: var(--sirena); }
   .subtitular { margin: 8px 0 0; font-size: 15px; color: var(--tinta-2); min-height: 1.45em; }
 
-  /* ---- Plano ---- */
-  #plano { display: block; width: 100%; height: auto; margin: 18px 0 6px; overflow: visible; }
-  #plano .piso { fill: var(--yeso); transition: fill .3s; }
-  .escena.alarma #plano .piso { fill: #F3C4BE; }
+  /* ---- Grupos de sensores ---- */
+  .grupo-cab { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 28px 0 0; }
+  .grupo-cab h2 { margin: 0; }
+  .grupo-cab .cuenta { font-size: 13px; color: var(--tinta-2); font-variant-numeric: tabular-nums; }
+  .rejilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-top: 12px; }
+  .grupo[hidden] { display: none; }
+  .sin-sensores { margin: 26px 0 0; padding: 22px 18px; border: 1.5px dashed var(--linea); border-radius: 18px; color: var(--tinta-2); font-size: 15px; }
+  .sin-sensores strong { color: var(--tinta); }
+  .agregar { margin-top: 14px; width: 100%; border-style: dashed; padding: 12px 14px; }
 
-  #plano .particion { fill: none; stroke: var(--linea); stroke-width: 3; }
-  #plano .muros {
-    fill: none; stroke-width: 6; stroke-linejoin: miter;
-    stroke: var(--tinta-2); stroke-opacity: .6; stroke-dasharray: 12 9;
-    transition: stroke .3s, stroke-opacity .3s, stroke-dasharray .3s;
+  /* ---- Tarjeta de sensor ---- */
+  .tarjeta {
+    position: relative; display: flex; flex-direction: column; text-align: left;
+    width: 100%; padding: 0 0 13px; cursor: pointer; overflow: hidden;
+    background: var(--papel); border: 1.5px solid var(--linea); border-radius: 18px;
+    transition: border-color .3s, background-color .3s, box-shadow .3s;
   }
-  .escena.armado #plano .muros { stroke: var(--pino); stroke-opacity: 1; stroke-dasharray: 700 0; }
-  .escena.alarma #plano .muros {
-    stroke: var(--sirena); stroke-opacity: 1; stroke-dasharray: 700 0;
-    animation: latido .7s ease-in-out infinite alternate;
+  div.tarjeta { cursor: default; }
+  .tarjeta .ilu {
+    position: relative; height: 142px; overflow: hidden; display: grid; place-items: center;
+    background: linear-gradient(180deg, #DDE5E0, var(--yeso) 70%);
+    transition: background-color .3s;
   }
-  @keyframes latido { from { stroke-opacity: 1; } to { stroke-opacity: .3; } }
+  .tarjeta .nombre { padding: 11px 14px 0; font-weight: 700; font-size: 15px; letter-spacing: -0.005em; overflow-wrap: anywhere; }
+  .tarjeta .lectura { padding: 1px 14px 0; font-size: 14px; color: var(--tinta-2); }
+  .tarjeta .cuando { padding: 0 14px; font-size: 12px; color: var(--tinta-2); min-height: 1.4em; font-variant-numeric: tabular-nums; }
+  .tarjeta .lapiz { position: absolute; top: 9px; right: 9px; width: 18px; height: 18px; opacity: .45; }
+  .tarjeta .lapiz * { fill: none; stroke: var(--tinta); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .tarjeta:hover .lapiz { opacity: .9; }
 
-  #plano .hoja {
-    stroke: var(--tinta); stroke-width: 4; stroke-linecap: round;
-    transform-origin: 64px 200px; transition: transform .45s cubic-bezier(.3, 1.4, .5, 1), stroke .3s;
-  }
-  #plano .arco { fill: none; stroke: var(--ambar); stroke-width: 1.5; stroke-dasharray: 3 4; opacity: 0; transition: opacity .3s; }
-  #plano.puerta-abierta .hoja { transform: rotate(-75deg); stroke: var(--ambar); }
-  #plano.puerta-abierta .arco { opacity: 1; }
-  .escena.alarma #plano.puerta-abierta .hoja { stroke: var(--sirena); }
+  .tarjeta.abierta, .tarjeta.actividad, .tarjeta.prueba { border-color: var(--ambar); }
+  .tarjeta.abierta .lectura, .tarjeta.actividad .lectura, .tarjeta.prueba .lectura { color: var(--ambar-texto); font-weight: 700; }
+  .tarjeta.abierta .ilu, .tarjeta.actividad .ilu { background: linear-gradient(180deg, #F3E3BE, #F7EEDB 75%); }
+  .tarjeta.sin-datos { border-style: dashed; }
+  .tarjeta.sin-datos .ilu { filter: grayscale(.85) opacity(.75); }
+  .tarjeta.disparado, .tarjeta.sonando { border-color: var(--sirena); background: var(--sirena-claro); animation: aro .8s ease-in-out infinite alternate; }
+  .tarjeta.disparado .ilu, .tarjeta.sonando .ilu { background: linear-gradient(180deg, #F3C4BE, var(--sirena-claro) 75%); }
+  .tarjeta.disparado .lectura, .tarjeta.sonando .lectura { color: var(--sirena); font-weight: 700; }
+  @keyframes aro { from { box-shadow: 0 0 0 0 rgba(210, 47, 39, .45); } to { box-shadow: 0 0 0 6px rgba(210, 47, 39, 0); } }
 
-  #plano .cono { fill: var(--ambar); opacity: 0; transform-origin: 300px 40px; }
-  #plano.movimiento .cono { animation: cono 1.5s ease-out infinite; }
-  @keyframes cono {
-    0%   { opacity: .55; transform: scale(.35); }
-    100% { opacity: 0;   transform: scale(1); }
-  }
-  #plano .sensor-pir { fill: var(--tinta); }
-  #plano.movimiento .sensor-pir { fill: var(--ambar); }
-  #plano .zona { font-size: 12px; font-weight: 600; fill: var(--tinta-2); letter-spacing: .01em; }
+  /* =========================================================
+     Ilustraciones. Todas tienen una animacion ambiental en reposo
+     y cambian de comportamiento cuando el sensor se activa.
+     ========================================================= */
 
-  /* ---- Lectura de cada sensor ---- */
-  .sensores { list-style: none; margin: 10px 0 4px; padding: 0; border-top: 1px solid var(--linea); }
-  .sensores li {
-    display: grid; grid-template-columns: 26px 1fr auto; align-items: center;
-    column-gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--linea);
+  @keyframes parpadeo { 0%, 86%, 100% { opacity: 1; } 92% { opacity: .15; } }
+  @keyframes respirar { 0%, 100% { opacity: .35; transform: scale(.85); } 50% { opacity: 1; transform: scale(1.1); } }
+
+  /* ---- Puerta vista de frente ---- */
+  .pu { position: relative; width: 84px; height: 108px; margin-top: 8px; perspective: 430px; }
+  .pu .marco { position: absolute; inset: 0; border: 6px solid #8C9A94; border-bottom: 0; border-radius: 5px 5px 0 0; transition: border-color .4s; }
+  .pu .vano {
+    position: absolute; left: 6px; right: 6px; top: 6px; bottom: 0; overflow: hidden;
+    background: linear-gradient(#2A3B35, #1B2926); transition: background .6s;
   }
-  .escena.alarma .sensores, .escena.alarma .sensores li { border-color: #E8AEA7; }
-  .sensores .glifo { width: 26px; height: 26px; }
-  .sensores .glifo * { fill: none; stroke: var(--tinta-2); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-  .sensor-nombre { display: block; font-weight: 600; font-size: 15px; }
-  .sensor-lectura { display: block; font-size: 14px; color: var(--tinta-2); }
-  .sensor-lectura.actividad { color: var(--ambar-texto); font-weight: 600; }
-  .sensor-cuando { font-size: 13px; color: var(--tinta-2); font-variant-numeric: tabular-nums; text-align: right; }
+  .abierta .pu .marco { border-color: var(--ambar); }
+  .abierta .pu .vano { background: radial-gradient(130% 95% at 35% 100%, #FBD98A, #C9861D 55%, #5F3E0B); }
+  .disparado .pu .marco { border-color: var(--sirena); }
+  .pu .giro {
+    position: absolute; left: 6px; right: 6px; top: 6px; bottom: 0;
+    transform-origin: left center; transform-style: preserve-3d;
+    transition: transform 1s cubic-bezier(.34, 1.4, .5, 1);
+  }
+  .abierta .pu .giro { transform: rotateY(-72deg); }
+  .pu .cara {
+    position: absolute; inset: 0; overflow: hidden; border-radius: 2px 2px 0 0;
+    background: linear-gradient(90deg, #1F7060, #17695A 55%, #114B40);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08);
+    transform-origin: left center; animation: puerta-respira 7s ease-in-out infinite;
+  }
+  .abierta .pu .cara { animation: puerta-balanceo 3.2s ease-in-out infinite; }
+  @keyframes puerta-respira { 0%, 100% { transform: rotateY(0); } 50% { transform: rotateY(-1.6deg); } }
+  @keyframes puerta-balanceo { 0%, 100% { transform: rotateY(2deg); } 50% { transform: rotateY(-2.5deg); } }
+  .pu .cara::before, .pu .cara::after { content: ""; position: absolute; left: 14%; right: 14%; border: 2px solid rgba(255, 255, 255, .16); border-radius: 2px; }
+  .pu .cara::before { top: 8%; height: 34%; }
+  .pu .cara::after  { bottom: 8%; height: 40%; }
+  .pu .brillo {
+    position: absolute; inset: 0;
+    background: linear-gradient(105deg, transparent 38%, rgba(255, 255, 255, .28) 50%, transparent 62%) 160% 0 / 260% 100% no-repeat;
+    animation: brillo 8s ease-in-out infinite;
+  }
+  @keyframes brillo { 0%, 55% { background-position: 160% 0; } 100% { background-position: -60% 0; } }
+  .pu .pomo { position: absolute; right: 9px; top: 54%; width: 8px; height: 8px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #FFE7A3, #C9931F); box-shadow: 0 1px 2px rgba(0, 0, 0, .4); }
+  .pu .suelo { position: absolute; left: -16px; right: -16px; bottom: -2px; height: 3px; border-radius: 2px; background: #8C9A94; }
+  .pu .luz {
+    position: absolute; left: 6px; right: -4px; top: 100%; height: 24px; opacity: 0;
+    background: linear-gradient(rgba(247, 178, 45, .8), rgba(247, 178, 45, 0));
+    clip-path: polygon(0 0, 100% 0, 128% 100%, -28% 100%); transition: opacity .6s;
+  }
+  .abierta .pu .luz { opacity: 1; animation: luz 2.4s ease-in-out infinite alternate; }
+  @keyframes luz { from { opacity: .55; } to { opacity: 1; } }
+  .pu .led { position: absolute; right: -15px; top: 20px; width: 7px; height: 7px; border-radius: 50%; background: #9AA8A2; transition: background .3s; }
+  .armado .pu .led { background: var(--pino); box-shadow: 0 0 6px var(--pino); animation: parpadeo 2.6s infinite; }
+  .abierta .pu .led, .abierta.armado .pu .led { background: var(--ambar); box-shadow: 0 0 7px var(--ambar); animation: parpadeo .7s infinite; }
+  .disparado .pu .led { background: var(--sirena); box-shadow: 0 0 8px var(--sirena); animation: parpadeo .3s infinite; }
+
+  /* ---- Ventana vista desde adentro ---- */
+  .vn { position: relative; width: 104px; height: 92px; margin-top: 4px; perspective: 520px; }
+  .vn .marco { position: absolute; inset: 0; overflow: hidden; border: 5px solid #8C9A94; border-radius: 5px; background: #0E1A2D; transition: border-color .4s; }
+  .abierta .vn .marco { border-color: var(--ambar); }
+  .disparado .vn .marco { border-color: var(--sirena); }
+  .vn .cielo { position: absolute; inset: 0; background: linear-gradient(#0E1A2D, #24446F 90%); }
+  .vn .estrellas, .vn .estrellas.b { position: absolute; inset: 0; animation: titilar 3.2s ease-in-out infinite; }
+  .vn .estrellas {
+    background:
+      radial-gradient(circle at 18% 22%, #fff 0 1px, transparent 1.6px),
+      radial-gradient(circle at 42% 14%, #fff 0 1px, transparent 1.6px),
+      radial-gradient(circle at 63% 34%, #fff 0 1.2px, transparent 1.8px),
+      radial-gradient(circle at 30% 52%, #fff 0 1px, transparent 1.6px);
+  }
+  .vn .estrellas.b {
+    animation-delay: 1.5s; animation-duration: 4.1s;
+    background:
+      radial-gradient(circle at 78% 58%, #fff 0 1px, transparent 1.6px),
+      radial-gradient(circle at 52% 66%, #fff 0 1.2px, transparent 1.8px),
+      radial-gradient(circle at 12% 70%, #fff 0 1px, transparent 1.6px),
+      radial-gradient(circle at 88% 12%, #fff 0 1px, transparent 1.6px);
+  }
+  @keyframes titilar { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+  .vn .luna { position: absolute; right: 22px; top: 10px; width: 15px; height: 15px; border-radius: 50%; box-shadow: inset -5px -1px 0 0 #F6EBC0; transform: rotate(-20deg); filter: drop-shadow(0 0 4px rgba(246, 235, 192, .6)); animation: respirar 6s ease-in-out infinite; }
+  .vn .cortina {
+    position: absolute; top: -2px; bottom: 6px; width: 22px; --a: 3deg;
+    background: repeating-linear-gradient(90deg, #EBCFA4 0 4px, #D7B07C 4px 8px);
+    border-radius: 0 0 6px 6px; transform-origin: top center; animation: ondea 5s ease-in-out infinite alternate;
+  }
+  .vn .cortina.i { left: 0; }
+  .vn .cortina.d { right: 0; animation-delay: -2s; }
+  .abierta .vn .cortina { --a: 9deg; animation-duration: 1.7s; }
+  @keyframes ondea { from { transform: skewX(calc(var(--a) * -.4)); } to { transform: skewX(var(--a)); } }
+  .vn .hoja { position: absolute; top: 5px; bottom: 5px; width: calc(50% - 5px); transform-style: preserve-3d; transition: transform 1s cubic-bezier(.34, 1.35, .5, 1); }
+  .vn .hoja.i { left: 5px;  transform-origin: left center; }
+  .vn .hoja.d { right: 5px; transform-origin: right center; }
+  .abierta .vn .hoja.i { transform: rotateY(-66deg); }
+  .abierta .vn .hoja.d { transform: rotateY(66deg); }
+  .vn .hoja .cara {
+    position: absolute; inset: 0; overflow: hidden; border: 3px solid #B4C0BA; border-radius: 2px;
+    background:
+      linear-gradient(#B4C0BA, #B4C0BA) center / 100% 3px no-repeat,
+      linear-gradient(#B4C0BA, #B4C0BA) center / 3px 100% no-repeat,
+      rgba(190, 220, 240, .16);
+    animation: hoja-respira 6s ease-in-out infinite;
+  }
+  .vn .hoja.i .cara { transform-origin: left center; }
+  .vn .hoja.d .cara { transform-origin: right center; animation-delay: -3s; }
+  .abierta .vn .hoja.i .cara { animation: hoja-i 3s ease-in-out infinite; }
+  .abierta .vn .hoja.d .cara { animation: hoja-d 3.4s ease-in-out infinite; }
+  @keyframes hoja-respira { 0%, 100% { transform: rotateY(0); } 50% { transform: rotateY(.9deg); } }
+  @keyframes hoja-i { 0%, 100% { transform: rotateY(2deg); } 50% { transform: rotateY(-3deg); } }
+  @keyframes hoja-d { 0%, 100% { transform: rotateY(-2deg); } 50% { transform: rotateY(3deg); } }
+  .vn .hoja .brillo {
+    position: absolute; inset: 0;
+    background: linear-gradient(115deg, transparent 35%, rgba(255, 255, 255, .34) 50%, transparent 65%) 170% 0 / 280% 100% no-repeat;
+    animation: brillo 9s ease-in-out infinite;
+  }
+  .vn .hoja.d .brillo { animation-delay: .6s; }
+  .vn .repisa { position: absolute; left: -7px; right: -7px; bottom: -6px; height: 6px; border-radius: 2px; background: #8C9A94; }
+  .vn .led { position: absolute; right: -14px; top: 8px; width: 7px; height: 7px; border-radius: 50%; background: #9AA8A2; }
+  .armado .vn .led { background: var(--pino); box-shadow: 0 0 6px var(--pino); animation: parpadeo 2.6s infinite; }
+  .abierta .vn .led, .abierta.armado .vn .led { background: var(--ambar); box-shadow: 0 0 7px var(--ambar); animation: parpadeo .7s infinite; }
+  .disparado .vn .led { background: var(--sirena); box-shadow: 0 0 8px var(--sirena); animation: parpadeo .3s infinite; }
+
+  /* ---- Sensor de movimiento (PIR) ---- */
+  .pr { position: relative; width: 100px; height: 100px; display: grid; place-items: center; }
+  .pr .placa { position: absolute; width: 66px; height: 80px; border-radius: 16px; background: linear-gradient(160deg, #F7F9F5, #D4DDD7); box-shadow: 0 2px 0 #B5C1BA, 0 10px 16px rgba(21, 48, 43, .16); }
+  .pr .led { position: absolute; left: 50%; top: calc(50% - 32px); width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%; background: #9AA8A2; }
+  .armado .pr .led { background: var(--pino); box-shadow: 0 0 5px var(--pino); animation: parpadeo 2.6s infinite; }
+  .actividad .pr .led, .actividad.armado .pr .led { background: var(--ambar); box-shadow: 0 0 6px var(--ambar); animation: parpadeo .25s infinite; }
+  .disparado .pr .led { background: var(--sirena); box-shadow: 0 0 6px var(--sirena); }
+  .pr .domo {
+    position: relative; width: 44px; height: 44px; border-radius: 50%; margin-top: 8px; overflow: hidden;
+    background: repeating-conic-gradient(from 0deg, #F3F5F0 0 15deg, #C6D1CB 15deg 30deg);
+    box-shadow: inset 0 0 0 3px #B5C1BA, 0 1px 3px rgba(21, 48, 43, .3);
+  }
+  .pr .domo::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(circle at 34% 28%, rgba(255, 255, 255, .85), transparent 46%); animation: destello 5s ease-in-out infinite; }
+  @keyframes destello { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+  .pr .calor { position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(circle, #FFC94F, #E39B12 70%); mix-blend-mode: multiply; opacity: 0; transition: opacity .3s; }
+  .actividad .pr .calor { opacity: .9; }
+  .disparado .pr .calor { background: radial-gradient(circle, #FF7B6B, #D22F27 70%); opacity: .95; }
+  .pr .onda, .pr .barrido { position: absolute; left: 50%; top: calc(50% + 8px); width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%; opacity: 0; pointer-events: none; }
+  .pr .barrido { border: 2px solid var(--tinta-2); animation: barrido 3.8s ease-out infinite; }
+  .pr .barrido.b { animation-delay: 1.9s; }
+  @keyframes barrido { 0% { opacity: .4; transform: scale(.9); } 100% { opacity: 0; transform: scale(2.1); } }
+  .pr .onda { border: 3px solid var(--ambar); }
+  .actividad .pr .barrido, .disparado .pr .barrido { display: none; }
+  .actividad .pr .onda, .disparado .pr .onda { animation: onda 1.3s ease-out infinite; }
+  .disparado .pr .onda { border-color: var(--sirena); }
+  .pr .onda.b { animation-delay: .43s !important; }
+  .pr .onda.c { animation-delay: .86s !important; }
+  @keyframes onda { 0% { opacity: .95; transform: scale(.85); } 100% { opacity: 0; transform: scale(2.3); } }
+  .actividad .pr .placa, .disparado .pr .placa { animation: vibra .16s linear infinite; }
+  @keyframes vibra { 0%, 100% { transform: translate(0, 0); } 25% { transform: translate(-1px, .5px); } 75% { transform: translate(1px, -.5px); } }
+
+  /* ---- Sirena ---- */
+  .si { position: relative; width: 100px; height: 100px; }
+  .si .haz {
+    position: absolute; left: 50%; top: 36%; width: 240px; height: 240px; margin: -120px 0 0 -120px; border-radius: 50%; opacity: 0; transition: opacity .3s;
+    background: conic-gradient(from 0deg, rgba(232, 60, 45, .7) 0 24deg, transparent 24deg 180deg, rgba(232, 60, 45, .7) 180deg 204deg, transparent 204deg);
+    -webkit-mask: radial-gradient(circle, #000 12%, transparent 62%); mask: radial-gradient(circle, #000 12%, transparent 62%);
+  }
+  .sonando .si .haz { opacity: 1; animation: gira .9s linear infinite; }
+  .prueba .si .haz { opacity: .8; animation: gira 1.2s linear infinite; background: conic-gradient(from 0deg, rgba(227, 155, 18, .7) 0 24deg, transparent 24deg 180deg, rgba(227, 155, 18, .7) 180deg 204deg, transparent 204deg); }
+  @keyframes gira { to { transform: rotate(360deg); } }
+  .si .cuerpo { position: absolute; inset: 0; }
+  .sonando .si .cuerpo, .prueba .si .cuerpo { animation: vibra .12s linear infinite; }
+  .si .domo {
+    position: absolute; left: 50%; bottom: 34px; width: 54px; height: 40px; margin-left: -27px; overflow: hidden;
+    border-radius: 27px 27px 4px 4px; background: linear-gradient(#7C3D37, #4E2421); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .08);
+    transition: background .3s, box-shadow .3s;
+  }
+  .si .domo::after { content: ""; position: absolute; inset: 0; background: radial-gradient(ellipse at 30% 22%, rgba(255, 255, 255, .55), transparent 44%); animation: destello 5s ease-in-out infinite; }
+  .sonando .si .domo { background: radial-gradient(circle at 50% 75%, #FF9E8F, #D22F27 62%, #8E1710); animation: pulso-sirena .45s ease-in-out infinite alternate; }
+  .prueba .si .domo { background: radial-gradient(circle at 50% 75%, #FFD98A, #E39B12 62%, #8A5A00); animation: pulso-ambar .6s ease-in-out infinite alternate; }
+  @keyframes pulso-sirena { from { box-shadow: 0 0 6px 0 rgba(210, 47, 39, .5); } to { box-shadow: 0 0 26px 9px rgba(210, 47, 39, .75); } }
+  @keyframes pulso-ambar { from { box-shadow: 0 0 6px 0 rgba(227, 155, 18, .5); } to { box-shadow: 0 0 22px 7px rgba(227, 155, 18, .7); } }
+  .si .base { position: absolute; left: 50%; bottom: 14px; width: 72px; height: 21px; margin-left: -36px; border-radius: 5px; background: linear-gradient(#BAC5BF, #97A49E); box-shadow: 0 6px 10px rgba(21, 48, 43, .2); overflow: hidden; }
+  .si .base::after { content: ""; position: absolute; left: 8px; right: 8px; top: 8px; bottom: 4px; background: repeating-linear-gradient(90deg, rgba(0, 0, 0, .28) 0 2px, transparent 2px 6px); border-radius: 2px; }
+  .si .led { position: absolute; left: 50%; bottom: 31px; width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%; background: #17A88B; box-shadow: 0 0 6px #17A88B; animation: respirar 3s ease-in-out infinite; z-index: 2; }
+  .sonando .si .led, .prueba .si .led { display: none; }
+  .si .ond { position: absolute; top: 24%; width: 24px; height: 40px; opacity: 0; border: 3px solid rgba(210, 47, 39, .8); --dir: 1; }
+  .si .ond.d { right: -4px; border-left: 0; border-radius: 0 50px 50px 0; }
+  .si .ond.i { left: -4px; --dir: -1; border-right: 0; border-radius: 50px 0 0 50px; }
+  .prueba .si .ond { border-color: rgba(227, 155, 18, .85); }
+  .sonando .si .ond, .prueba .si .ond { animation: sale 1s ease-out infinite; }
+  .si .ond.b { animation-delay: .5s !important; }
+  @keyframes sale { 0% { opacity: .9; transform: translateX(0) scale(.6); } 100% { opacity: 0; transform: translateX(calc(var(--dir) * 20px)) scale(1.35); } }
+
+  /* ---- Dialogo de edicion ---- */
+  dialog#dialogo { width: min(420px, calc(100vw - 28px)); padding: 0; border: 1px solid var(--linea); border-radius: 22px; background: var(--papel); color: var(--tinta); box-shadow: 0 24px 60px rgba(21, 48, 43, .28); }
+  dialog#dialogo::backdrop { background: rgba(21, 48, 43, .45); }
+  #dialogo form { padding: 22px 20px 18px; display: grid; gap: 14px; }
+  #dialogo h3 { margin: 0; font-size: 22px; font-weight: 800; font-stretch: 90%; letter-spacing: -0.02em; }
+  #dialogo label, #dialogo legend { display: block; font-size: 13px; font-weight: 600; color: var(--tinta-2); margin-bottom: 5px; padding: 0; }
+  #dialogo fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+  #dialogo input[type=text] { width: 100%; font: inherit; font-size: 16px; padding: 11px 12px; background: #fff; color: var(--tinta); border: 1.5px solid var(--linea); border-radius: 10px; }
+  #dialogo input[type=text]:focus { outline: 3px solid var(--pino-claro); border-color: var(--pino); }
+  .tipos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .tipos label { position: relative; margin: 0; }
+  .tipos input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+  .tipos span { display: block; text-align: center; padding: 10px 4px; font-size: 14px; font-weight: 700; color: var(--tinta); background: #fff; border: 1.5px solid var(--linea); border-radius: 10px; }
+  .tipos input:checked + span { background: var(--pino); border-color: var(--pino); color: #fff; }
+  .tipos input:focus-visible + span { outline: 3px solid var(--pino); outline-offset: 2px; }
+  .tipos input:disabled + span { opacity: .4; }
+  .tipos input:disabled { cursor: not-allowed; }
+  #dialogo .ayuda { font-size: 12.5px; color: var(--tinta-2); margin: 0; }
+  #dialogo .error { display: none; font-size: 14px; color: var(--sirena); font-weight: 600; margin: 0; }
+  #dialogo .error.visible { display: block; }
+  .dlg-botones { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 2px; }
+  .dlg-botones .boton { padding: 13px 10px; font-size: 16px; }
+  .boton.secundario { background: transparent; border-color: var(--linea); color: var(--tinta); }
+  .boton-eliminar { grid-column: 1 / -1; background: none; border: 0; padding: 8px; font-size: 14px; font-weight: 600; color: var(--sirena); cursor: pointer; text-decoration: underline; }
+  .boton-eliminar[hidden] { display: none; }
 
   /* ---- Botones ---- */
   .controles { display: grid; gap: 10px; margin-top: 16px; }
@@ -241,21 +442,19 @@
   #zona-pruebas .nota { font-size: 12px; color: var(--tinta-2); margin-top: 8px; }
   .pie { margin-top: 30px; font-size: 12px; color: var(--tinta-2); line-height: 1.6; }
 
-  /* ---- Escritorio: escena a la izquierda, ajustes e historial a la derecha ---- */
-  @media (min-width: 900px) {
-    .envoltura {
-      max-width: 1000px; padding-top: 24px;
-      display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr);
-      column-gap: 48px; align-items: start;
-    }
-    .barra, #aviso, .pie { grid-column: 1 / -1; }
-    .escena { margin-bottom: 0; position: sticky; top: 24px; }
-    h2:first-child { margin-top: 0; }
+  /* ---- Pantallas anchas: el titular y los botones van lado a lado ---- */
+  @media (min-width: 720px) {
+    .envoltura { padding-top: 24px; }
+    .escena { display: grid; grid-template-columns: minmax(0, 1fr) 260px; column-gap: 28px; align-items: end; padding: 28px 28px 26px; }
+    .escena .controles { margin-top: 0; }
+    .rejilla { grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); }
   }
 
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation: none !important; transition: none !important; }
-    #plano.movimiento .cono { opacity: .35; transform: none; }
+    .pr .onda { opacity: .5; transform: scale(1.4); }
+    .pr .barrido { display: none; }
+    .sonando .si .haz, .prueba .si .haz { opacity: .6; }
   }
 </style>
 </head>
@@ -275,44 +474,54 @@
   </div>
 
   <section class="escena desarmado" id="escena" aria-label="Estado de la casa">
-    <h1 class="titular" id="titular" aria-live="polite">Consultando la casa</h1>
-    <p class="subtitular" id="subtitular"></p>
-
-    <svg id="plano" viewBox="0 0 340 230" role="img"
-         aria-label="Plano de la casa con la puerta de entrada y el sensor de movimiento de la sala">
-      <rect class="piso" x="24" y="24" width="292" height="176"/>
-      <path class="cono" id="cono" d="M300 40 L266.4 165.6 A130 130 0 0 1 170.5 51.3 Z"/>
-      <path class="particion" d="M130 24 V105 M130 145 V200"/>
-      <path class="muros" id="muros" d="M64 200 H24 V24 H316 V200 H104"/>
-      <path class="arco" d="M104 200 A40 40 0 0 0 74.4 161.4"/>
-      <line class="hoja" x1="64" y1="200" x2="104" y2="200"/>
-      <circle class="sensor-pir" cx="300" cy="40" r="7"/>
-      <text class="zona" x="40" y="52">Entrada</text>
-      <text class="zona" x="146" y="52">Sala</text>
-    </svg>
-
-    <ul class="sensores">
-      <li>
-        <svg class="glifo" viewBox="0 0 26 26" aria-hidden="true"><path d="M4 22 H22"/><path d="M8 22 V4 H18 V22"/><circle cx="15.5" cy="13" r=".6"/></svg>
-        <div>
-          <span class="sensor-nombre">Puerta de entrada</span>
-          <span class="sensor-lectura" id="sensor-puerta">Sin datos</span>
-        </div>
-        <span class="sensor-cuando" id="sensor-puerta-cuando"></span>
-      </li>
-      <li>
-        <svg class="glifo" viewBox="0 0 26 26" aria-hidden="true"><circle cx="21" cy="5" r="1.4"/><path d="M21 5 L5 12"/><path d="M21 5 L9 22"/><path d="M5 12 A17 17 0 0 0 9 22"/></svg>
-        <div>
-          <span class="sensor-nombre">Movimiento en la sala</span>
-          <span class="sensor-lectura" id="sensor-movimiento">Sin detecciones</span>
-        </div>
-        <span class="sensor-cuando" id="sensor-movimiento-cuando"></span>
-      </li>
-    </ul>
+    <div class="texto-escena">
+      <h1 class="titular" id="titular" aria-live="polite">Consultando la casa</h1>
+      <p class="subtitular" id="subtitular"></p>
+    </div>
 
     <div class="controles">
       <button class="boton apagar-alarma" id="boton-apagar-alarma" onclick="apagarAlarma()" hidden>Apagar alarma</button>
       <button class="boton armar" id="boton-armado" onclick="alternarArmado()">Armar la casa</button>
+    </div>
+  </section>
+
+
+  <section class="grupo" id="grupo-contactos" hidden aria-label="Puertas y ventanas">
+    <div class="grupo-cab"><h2>Puertas y ventanas</h2><span class="cuenta" id="cuenta-contactos"></span></div>
+    <div class="rejilla" id="rejilla-contactos"></div>
+  </section>
+
+  <section class="grupo" id="grupo-movimiento" hidden aria-label="Sensores de movimiento">
+    <div class="grupo-cab"><h2>Movimiento</h2><span class="cuenta" id="cuenta-movimiento"></span></div>
+    <div class="rejilla" id="rejilla-movimiento"></div>
+  </section>
+
+  <div class="sin-sensores" id="sin-sensores" hidden>
+    <strong>Todavía no hay sensores.</strong> Aparecen solos en cuanto el nodo ESP32 envía su primera lectura,
+    y después puedes decidir si cada contacto es una puerta o una ventana. También puedes agregarlos a mano.
+  </div>
+
+  <button class="boton-texto agregar" id="boton-agregar" onclick="abrirDialogo(null)">+ Agregar sensor</button>
+
+  <section aria-label="Sirena">
+    <div class="grupo-cab"><h2>Sirena</h2></div>
+    <div class="rejilla">
+      <div class="tarjeta sirena" id="tarjeta-sirena">
+        <div class="ilu">
+          <div class="si">
+            <span class="haz"></span>
+            <div class="cuerpo">
+              <i class="ond i"></i><i class="ond i b"></i><i class="ond d"></i><i class="ond d b"></i>
+              <div class="domo"></div>
+              <div class="base"></div>
+              <span class="led"></span>
+            </div>
+          </div>
+        </div>
+        <div class="nombre">Sirena</div>
+        <div class="lectura" id="sirena-lectura">En espera</div>
+        <div class="cuando" id="sirena-cuando"></div>
+      </div>
     </div>
   </section>
 
@@ -343,7 +552,7 @@
       </div>
     </section>
 
-    <h2>Historial</h2>
+    <h2 style="margin-top:34px">Historial</h2>
     <ol class="linea" id="lista"><li class="cargando">Consultando el servidor</li></ol>
 
     <div id="zona-pruebas">
@@ -353,6 +562,39 @@
   </div>
 
   <div class="pie">Proyecto de Carrera, UABC FCQI</div>
+
+  <dialog id="dialogo" aria-labelledby="dlg-titulo">
+    <form id="dlg-form" onsubmit="guardarSensor(event)">
+      <h3 id="dlg-titulo">Sensor</h3>
+      <div>
+        <label for="dlg-nombre">Nombre</label>
+        <input type="text" id="dlg-nombre" maxlength="60" autocomplete="off" placeholder="Ej. Puerta de la cocina">
+      </div>
+      <fieldset>
+        <legend>Tipo</legend>
+        <div class="tipos">
+          <label><input type="radio" name="tipo" value="puerta"><span>Puerta</span></label>
+          <label><input type="radio" name="tipo" value="ventana"><span>Ventana</span></label>
+          <label><input type="radio" name="tipo" value="movimiento"><span>Movimiento</span></label>
+        </div>
+      </fieldset>
+      <div>
+        <label for="dlg-zona">Zona</label>
+        <input type="text" id="dlg-zona" maxlength="40" autocomplete="off" placeholder="Ej. cocina">
+      </div>
+      <div id="dlg-id-fila">
+        <label for="dlg-id">Identificador del sensor</label>
+        <input type="text" id="dlg-id" maxlength="60" autocomplete="off" placeholder="El mismo que usa el firmware">
+      </div>
+      <p class="ayuda" id="dlg-ayuda"></p>
+      <p class="error" id="dlg-error" role="alert"></p>
+      <div class="dlg-botones">
+        <button type="button" class="boton secundario" onclick="cerrarDialogo()">Cancelar</button>
+        <button type="submit" class="boton armar" id="dlg-guardar">Guardar</button>
+        <button type="button" class="boton-eliminar" id="dlg-eliminar" onclick="eliminarSensor()" hidden>Eliminar sensor</button>
+      </div>
+    </form>
+  </dialog>
 
 </div>
 
@@ -467,41 +709,267 @@ function pintarEstado() {
   sirena.textContent = estado.actuador_activo ? 'Apagar' : 'Encender';
   sirena.className = 'boton-texto' + (estado.actuador_activo ? ' activa' : '');
 
+  pintarSirena();
+  if (sensores.length) pintarSensoresTarjetas();
   if (!alarma) restaurarTitulo();
 }
 
-// Muestra la lectura más reciente de cada sensor, tomada del historial
-function pintarSensores(mediciones) {
-  const puerta = mediciones.find(m => m.variable === 'estado_puerta');
-  const mov = mediciones.find(m => m.variable === 'movimiento');
-  const plano = $('plano');
 
-  const abierta = !!puerta && Number(puerta.valor) === 1;
-  plano.classList.toggle('puerta-abierta', abierta);
-  const lp = $('sensor-puerta');
-  lp.textContent = puerta ? (abierta ? 'Abierta' : 'Cerrada') : 'Sin datos';
-  lp.className = 'sensor-lectura' + (abierta ? ' actividad' : '');
-  $('sensor-puerta-cuando').textContent = puerta ? hace(puerta.creado_en) : '';
+// ===================== Ilustraciones =====================
+// Cada tarjeta lleva una ilustración en CSS. El JS solo cambia clases; todo el
+// movimiento (incluido el de reposo) está definido en las hojas de estilo.
 
-  const reciente = !!mov && (Date.now() - new Date(mov.creado_en)) / 1000 < MOVIMIENTO_RECIENTE_S;
-  plano.classList.toggle('movimiento', reciente);
-  const lm = $('sensor-movimiento');
-  lm.textContent = reciente ? 'Movimiento ahora' : (mov ? 'Sin movimiento' : 'Sin detecciones');
-  lm.className = 'sensor-lectura' + (reciente ? ' actividad' : '');
-  $('sensor-movimiento-cuando').textContent = mov ? (reciente ? '' : 'última vez ' + hace(mov.creado_en)) : '';
+const ILUSTRACIONES = {
+  puerta:
+    '<div class="pu"><div class="marco"></div><div class="vano"></div>' +
+    '<div class="giro"><div class="cara"><span class="brillo"></span><span class="pomo"></span></div></div>' +
+    '<span class="luz"></span><span class="suelo"></span><span class="led"></span></div>',
+  ventana:
+    '<div class="vn"><div class="marco"><div class="cielo"></div><div class="estrellas"></div><div class="estrellas b"></div>' +
+    '<span class="luna"></span><span class="cortina i"></span><span class="cortina d"></span></div>' +
+    '<div class="hoja i"><div class="cara"><span class="brillo"></span></div></div>' +
+    '<div class="hoja d"><div class="cara"><span class="brillo"></span></div></div>' +
+    '<span class="repisa"></span><span class="led"></span></div>',
+  movimiento:
+    '<div class="pr"><div class="placa"></div><span class="led"></span>' +
+    '<i class="barrido"></i><i class="barrido b"></i><i class="onda"></i><i class="onda b"></i><i class="onda c"></i>' +
+    '<div class="domo"><span class="calor"></span></div></div>'
+};
+
+const ICONO_LAPIZ = '<svg class="lapiz" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>';
+
+// ===================== Sensores =====================
+
+let sensores = [];
+const tarjetas = new Map();   // id de sensor -> elemento, para actualizar sin recrear
+
+function esc(t) {
+  return String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function crearTarjeta(s) {
+  const el = document.createElement('button');
+  el.type = 'button';
+  el.className = 'tarjeta ' + s.tipo;
+  el.dataset.id = s.id;
+  el.dataset.tipo = s.tipo;
+  el.innerHTML = '<div class="ilu">' + ILUSTRACIONES[s.tipo] + '</div>' +
+    '<div class="nombre"></div><div class="lectura"></div><div class="cuando"></div>' + ICONO_LAPIZ;
+  el.addEventListener('click', () => abrirDialogo(el._s));
+  return el;
+}
+
+function ponerTexto(el, sel, texto) {
+  const n = el.querySelector(sel);
+  if (n.textContent !== texto) n.textContent = texto;
+}
+
+// Solo se tocan clases y textos: así las animaciones no se reinician en cada consulta
+function actualizarTarjeta(el, s) {
+  const alarmaAqui = !!estado.alarma_activa && estado.alarma_sensor === s.sensor_id;
+  const sinDatos = !s.ultima_lectura;
+  let lectura, cuando, clases;
+
+  if (s.tipo === 'movimiento') {
+    const det = s.ultima_deteccion;
+    const reciente = !!det && (Date.now() - new Date(det)) / 1000 < MOVIMIENTO_RECIENTE_S;
+    lectura = reciente ? 'Movimiento ahora' : (det ? 'Sin movimiento' : (sinDatos ? 'Sin datos' : 'Sin detecciones'));
+    cuando = reciente ? '' : (det ? 'última vez ' + hace(det) : '');
+    clases = ['tarjeta', 'movimiento'];
+    if (reciente) clases.push('actividad');
+  } else {
+    const abierta = Number(s.ultimo_valor) === 1 && !sinDatos;
+    lectura = sinDatos ? 'Sin datos' : (abierta ? 'Abierta' : 'Cerrada');
+    cuando = sinDatos ? 'Aún no reporta' : hace(s.ultima_lectura);
+    clases = ['tarjeta', s.tipo];
+    if (abierta) clases.push('abierta');
+  }
+  if (sinDatos) clases.push('sin-datos');
+  if (alarmaAqui) clases.push('disparado');
+  if (estado.armado) clases.push('armado');
+
+  const nombre = s.nombre + (s.zona && !s.nombre.toLowerCase().includes(s.zona.toLowerCase()) ? '' : '');
+  ponerTexto(el, '.nombre', nombre);
+  ponerTexto(el, '.lectura', lectura);
+  ponerTexto(el, '.cuando', cuando);
+  const cls = clases.join(' ');
+  if (el.className !== cls) el.className = cls;
+  el.setAttribute('aria-label', s.nombre + ': ' + lectura + '. Toca para editar.');
+}
+
+function pintarSensoresTarjetas() {
+  const vivos = new Set(sensores.map(s => s.id));
+  for (const [id, el] of tarjetas) {
+    if (!vivos.has(id)) { el.remove(); tarjetas.delete(id); }
+  }
+
+  for (const s of sensores) {
+    let el = tarjetas.get(s.id);
+    if (el && el.dataset.tipo !== s.tipo) { el.remove(); tarjetas.delete(s.id); el = null; }  // cambio de puerta a ventana
+    if (!el) { el = crearTarjeta(s); tarjetas.set(s.id, el); }
+    el._s = s;
+    actualizarTarjeta(el, s);
+  }
+
+  const grupos = [
+    ['rejilla-contactos', 'grupo-contactos', 'cuenta-contactos', sensores.filter(s => s.tipo !== 'movimiento')],
+    ['rejilla-movimiento', 'grupo-movimiento', 'cuenta-movimiento', sensores.filter(s => s.tipo === 'movimiento')]
+  ];
+  for (const [idRejilla, idGrupo, idCuenta, lista] of grupos) {
+    const rejilla = $(idRejilla);
+    lista.forEach((s, i) => {
+      const el = tarjetas.get(s.id);
+      // Solo se reubica lo que cambió de lugar, porque mover un nodo reinicia sus animaciones
+      if (rejilla.children[i] !== el) rejilla.insertBefore(el, rejilla.children[i] || null);
+    });
+    $(idGrupo).hidden = lista.length === 0;
+    $(idCuenta).textContent = lista.length ? String(lista.length) : '';
+  }
+  $('sin-sensores').hidden = sensores.length > 0;
+}
+
+// La sirena refleja la alarma real o la prueba manual
+function pintarSirena() {
+  const el = $('tarjeta-sirena');
+  const sonando = !!estado.alarma_activa;
+  const prueba = !sonando && !!estado.actuador_activo;
+  const cls = 'tarjeta sirena' + (sonando ? ' sonando' : '') + (prueba ? ' prueba' : '');
+  if (el.className !== cls) el.className = cls;
+  $('sirena-lectura').textContent = sonando ? 'Sonando' : (prueba ? 'Prueba en curso' : 'En espera');
+  $('sirena-cuando').textContent = sonando ? (estado.alarma_motivo || '') : (estado.armado ? 'Vigilando' : '');
+}
+
+// ===================== Edición de sensores =====================
+
+let editando = null;      // sensor que se edita; null cuando se agrega uno nuevo
+let confirmandoEliminar = null;
+
+async function enviarJson(ruta, metodo, cuerpo) {
+  const control = new AbortController();
+  const reloj = setTimeout(() => control.abort(), TIEMPO_LIMITE_MS);
+  try {
+    const r = await fetch(ruta, {
+      method: metodo, signal: control.signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cuerpo || {})
+    });
+    let datos = {};
+    try { datos = await r.json(); } catch (e) { /* respuesta sin cuerpo */ }
+    return { ok: r.ok, datos };
+  } finally {
+    clearTimeout(reloj);
+  }
+}
+
+function abrirDialogo(s) {
+  editando = s || null;
+  $('dlg-titulo').textContent = s ? 'Editar sensor' : 'Agregar sensor';
+  $('dlg-nombre').value = s ? s.nombre : '';
+  $('dlg-zona').value = s && s.zona ? s.zona : '';
+  $('dlg-id').value = '';
+  $('dlg-id-fila').hidden = !!s;
+  $('dlg-eliminar').hidden = !s;
+  $('dlg-error').classList.remove('visible');
+  $('dlg-guardar').disabled = false;
+  reiniciarEliminar();
+
+  // Un contacto solo puede ser puerta o ventana, y un detector solo movimiento
+  const variable = s ? s.variable : null;
+  for (const r of document.querySelectorAll('#dlg-form input[name=tipo]')) {
+    const esMov = r.value === 'movimiento';
+    r.disabled = (variable === 'estado_puerta' && esMov) || (variable === 'movimiento' && !esMov);
+    r.checked = r.value === (s ? s.tipo : 'puerta');
+  }
+  $('dlg-ayuda').textContent = s
+    ? 'Identificador: ' + s.sensor_id + (s.nodo_id ? ' · nodo ' + s.nodo_id : '') +
+      (variable ? '. Un contacto puede ser puerta o ventana; un detector solo movimiento.' : '')
+    : 'Usa el mismo identificador que el firmware (sensorId). Si el nodo aún no lo reporta, la tarjeta dirá "Sin datos".';
+
+  const d = $('dialogo');
+  if (typeof d.showModal === 'function') d.showModal(); else d.setAttribute('open', '');
+  $('dlg-nombre').focus();
+}
+
+function cerrarDialogo() {
+  reiniciarEliminar();
+  const d = $('dialogo');
+  if (typeof d.close === 'function') d.close(); else d.removeAttribute('open');
+}
+
+function mostrarErrorDialogo(t) {
+  $('dlg-error').textContent = t;
+  $('dlg-error').classList.add('visible');
+}
+
+async function guardarSensor(ev) {
+  ev.preventDefault();
+  const tipo = (document.querySelector('#dlg-form input[name=tipo]:checked') || {}).value;
+  const nombre = $('dlg-nombre').value.trim();
+  const zona = $('dlg-zona').value.trim();
+  $('dlg-error').classList.remove('visible');
+
+  if (!editando && !$('dlg-id').value.trim()) { mostrarErrorDialogo('Escribe el identificador del sensor.'); return; }
+  if (!tipo) { mostrarErrorDialogo('Elige si es puerta, ventana o movimiento.'); return; }
+
+  $('dlg-guardar').disabled = true;
+  try {
+    const r = editando
+      ? await enviarJson('/sensores/' + editando.id, 'PATCH', { nombre, tipo, zona, usuario: 'residente' })
+      : await enviarJson('/sensores', 'POST', { vivienda_id: VIVIENDA, sensor_id: $('dlg-id').value.trim(), nombre, tipo, zona, usuario: 'residente' });
+    if (!r.ok) {
+      mostrarErrorDialogo((r.datos && (r.datos.mensaje || (r.datos.errores || []).join(' '))) || 'No se pudo guardar.');
+      $('dlg-guardar').disabled = false;
+      return;
+    }
+    cerrarDialogo();
+    await refrescar(true);
+  } catch (e) {
+    mostrarErrorDialogo(mensajeDeError(e));
+    $('dlg-guardar').disabled = false;
+  }
+}
+
+function reiniciarEliminar() {
+  if (confirmandoEliminar) { clearTimeout(confirmandoEliminar); confirmandoEliminar = null; }
+  const b = $('dlg-eliminar');
+  b.textContent = 'Eliminar sensor';
+}
+
+// Dos toques para no eliminar por accidente
+async function eliminarSensor() {
+  if (!editando) return;
+  const b = $('dlg-eliminar');
+  if (!confirmandoEliminar) {
+    b.textContent = 'Toca de nuevo para eliminar';
+    confirmandoEliminar = setTimeout(reiniciarEliminar, 4000);
+    return;
+  }
+  reiniciarEliminar();
+  try {
+    const r = await enviarJson('/sensores/' + editando.id, 'DELETE', { usuario: 'residente' });
+    if (!r.ok) { mostrarErrorDialogo((r.datos && r.datos.mensaje) || 'No se pudo eliminar.'); return; }
+    cerrarDialogo();
+    await refrescar(true);
+  } catch (e) {
+    mostrarErrorDialogo(mensajeDeError(e));
+  }
 }
 
 // Une las lecturas de los sensores con las acciones del usuario en una sola línea de tiempo
 function construirHitos(mediciones, acciones) {
   const hitos = [];
+  const porId = {};
+  for (const s of sensores) porId[s.sensor_id] = s;
 
   for (const m of mediciones) {
     const zona = m.zona ? ' en ' + m.zona : '';
+    const sen = porId[m.sensor_id];
     if (m.variable === 'estado_puerta') {
       const abierta = Number(m.valor) === 1;
-      hitos.push({ t: m.creado_en, clase: abierta ? 'actividad' : 'cerrada', titulo: abierta ? 'Puerta abierta' : 'Puerta cerrada', detalle: zona });
+      const titulo = sen ? sen.nombre + (abierta ? ' abierta' : ' cerrada') : (abierta ? 'Puerta abierta' : 'Puerta cerrada');
+      hitos.push({ t: m.creado_en, clase: abierta ? 'actividad' : 'cerrada', titulo, detalle: sen ? '' : zona });
     } else if (m.variable === 'movimiento') {
-      hitos.push({ t: m.creado_en, clase: 'actividad', titulo: 'Movimiento detectado', detalle: zona });
+      hitos.push({ t: m.creado_en, clase: 'actividad', titulo: 'Movimiento detectado', detalle: sen ? ' · ' + sen.nombre : zona });
     } else {
       hitos.push({ t: m.creado_en, clase: '', titulo: m.variable + ' ' + m.valor, detalle: zona });
     }
@@ -515,6 +983,7 @@ function construirHitos(mediciones, acciones) {
     apagar_alarma:     ['Alarma apagada desde la app', ''],
     alarma_silenciosa: ['Alarma en modo silencioso, sin sirena', 'alarma']
   };
+  const conNombre = { sensor_agregado: 'Sensor agregado', sensor_editado: 'Sensor editado', sensor_eliminado: 'Sensor eliminado' };
   for (const a of acciones) {
     let titulo, clase = '';
     if (textos[a.accion]) {
@@ -523,6 +992,8 @@ function construirHitos(mediciones, acciones) {
       titulo = a.valor_nuevo === 'true' ? 'Modo silencioso activado' : 'Modo silencioso desactivado';
     } else if (a.accion === 'salida_audible') {
       titulo = a.valor_nuevo === 'true' ? 'Prueba de sirena encendida' : 'Prueba de sirena apagada';
+    } else if (conNombre[a.accion]) {
+      titulo = conNombre[a.accion] + (a.valor_nuevo ? ': ' + a.valor_nuevo : '');
     } else {
       titulo = a.accion;
     }
@@ -537,7 +1008,7 @@ function pintarHistorial(hitos) {
 
   // Ausencia de datos, distinta de un error: se indica qué hacer
   if (!hitos.length) {
-    lista.innerHTML = '<li class="vacio">Todavía no hay eventos. Abre la puerta o pasa frente al sensor de la sala para generar el primero.</li>';
+    lista.innerHTML = '<li class="vacio">Todavía no hay eventos. Abre una puerta o pasa frente a un sensor para generar el primero.</li>';
     return;
   }
 
@@ -545,8 +1016,8 @@ function pintarHistorial(hitos) {
     '<li class="hito ' + h.clase + '">' +
       '<div class="riel"><span class="marca"></span></div>' +
       '<div class="texto">' +
-        '<div class="quien">' + h.titulo + '</div>' +
-        '<div class="cuando">' + formatearFecha(h.t) + h.detalle + '</div>' +
+        '<div class="quien">' + esc(h.titulo) + '</div>' +
+        '<div class="cuando">' + formatearFecha(h.t) + esc(h.detalle) + '</div>' +
       '</div>' +
     '</li>'
   ).join('');
@@ -557,10 +1028,11 @@ function pintarHistorial(hitos) {
 async function refrescar(manual = false) {
   try {
     const q = encodeURIComponent(VIVIENDA);
-    const [est, med, acc] = await Promise.all([
+    const [est, med, acc, sen] = await Promise.all([
       pedir('/estado?vivienda_id=' + q),
       pedir('/mediciones?vivienda_id=' + q + '&limite=40'),
-      pedir('/acciones?vivienda_id=' + q + '&limite=40')
+      pedir('/acciones?vivienda_id=' + q + '&limite=40'),
+      pedir('/sensores?vivienda_id=' + q)
     ]);
 
     if (est) {
@@ -574,7 +1046,8 @@ async function refrescar(manual = false) {
 
     const mediciones = med && med.mediciones ? med.mediciones : [];
     const acciones = acc && acc.acciones ? acc.acciones : [];
-    pintarSensores(mediciones);
+    sensores = sen && sen.sensores ? sen.sensores : [];
+    pintarSensoresTarjetas();
     pintarHistorial(construirHitos(mediciones, acciones));
 
     fallosSeguidos = 0;
