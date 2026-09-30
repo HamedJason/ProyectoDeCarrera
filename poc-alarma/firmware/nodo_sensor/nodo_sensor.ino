@@ -49,7 +49,10 @@ const char* NODO_ID     = "nodo-01";
 // ===================== Hardware =====================
 
 const int PIN_PUERTA = 4;   // contacto MC-38, con resistencia pull-up interna
-const int PIN_PIR    = 5;   // salida del AM312, activa en alto
+// El AM312 va en el GPIO 18. El GPIO 5 se probo primero y daba lecturas falsas
+// porque es un pin de arranque (strapping) del ESP32, con pull-up interno activo
+// al encender. Los pines 4 y 18 no tienen esa funcion.
+const int PIN_PIR    = 18;  // salida del AM312, activa en alto
 const int PIN_SALIDA = 2;   // LED integrado o entrada del relevador de la sirena
 
 // Para usar solo uno de los dos sensores, poner el otro en false

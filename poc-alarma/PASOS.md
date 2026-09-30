@@ -394,7 +394,7 @@ abre y el ESP32 lo lee como apertura.
 | ESP32 | AM312 |
 |---|---|
 | 3V3 | VCC |
-| GPIO 5 | OUT |
+| GPIO 18 | OUT |
 | GND | GND |
 
 El AM312 entrega 3.3 V en su salida, por lo que se conecta directo sin divisor.
