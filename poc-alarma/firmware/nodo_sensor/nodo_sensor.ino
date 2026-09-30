@@ -42,6 +42,11 @@
 #include <ArduinoJson.h>
 #include <esp_now.h>
 #include <esp_idf_version.h>
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+#include <esp_mac.h>
+#else
+#include <esp_system.h>
+#endif
 
 // ===================== Configuracion editable =====================
 
@@ -707,9 +712,19 @@ void atenderRemotos() {
   }
 }
 
+// Lee la MAC directo del chip. WiFi.macAddress() puede devolver ceros si se
+// llama antes de que el Wi-Fi termine de arrancar.
+void imprimirMac(const char* etiqueta) {
+  uint8_t mac[6];
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);
+  char texto[18];
+  snprintf(texto, sizeof(texto), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  Serial.print(etiqueta);
+  Serial.println(texto);
+}
+
 void iniciarEspNow() {
-  Serial.print("[MAC] Esta placa (nodo receptor): ");
-  Serial.println(WiFi.macAddress());
+  imprimirMac("[MAC] Esta placa (nodo receptor): ");
 
   if (esp_now_init() != ESP_OK) {
     Serial.println("[ESP-NOW] No se pudo iniciar. No se recibiran nodos perifericos.");

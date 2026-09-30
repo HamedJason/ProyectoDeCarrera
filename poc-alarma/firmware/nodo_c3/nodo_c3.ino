@@ -30,6 +30,11 @@
 #include <esp_now.h>
 #include <esp_wifi.h>
 #include <esp_idf_version.h>
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+#include <esp_mac.h>
+#else
+#include <esp_system.h>
+#endif
 
 // ===================== Configuracion editable =====================
 
@@ -114,6 +119,17 @@ PaqueteSensor cola[CAP_COLA];
 int colaTam = 0;
 
 void IRAM_ATTR alDetectarPir() { pirPulso = true; }
+
+// Lee la MAC directo del chip. WiFi.macAddress() puede devolver ceros si se
+// llama antes de que el Wi-Fi termine de arrancar.
+void imprimirMac(const char* etiqueta) {
+  uint8_t mac[6];
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);
+  char texto[18];
+  snprintf(texto, sizeof(texto), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  Serial.print(etiqueta);
+  Serial.println(texto);
+}
 
 // ===================== ESP-NOW =====================
 
@@ -271,8 +287,7 @@ void setup() {
     delay(5000);
     ESP.restart();
   }
-  Serial.print("[MAC] Esta placa (nodo C3): ");
-  Serial.println(WiFi.macAddress());
+  imprimirMac("[MAC] Esta placa (nodo C3): ");
 
   Serial.print("[PIR] Estabilizando el sensor durante ");
   Serial.print(PIR_ESTABILIZACION_MS / 1000);
