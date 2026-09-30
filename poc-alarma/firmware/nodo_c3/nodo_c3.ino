@@ -46,11 +46,22 @@ uint8_t MAC_RECEPTOR[6] = { 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF };
 // la aplicacion conserva el historial y los nombres que ya les pusiste.
 const char* NODO_ID          = "nodo-c3-01";
 const char* ZONA             = "sala";
-const char* ID_CONTACTO      = "sensor-puerta-01";
 const char* ID_PIR           = "pir-sala-01";
-const char* ZONA_CONTACTO    = "entrada";
 
-const int PIN_CONTACTO = 4;   // MC-38, contra GND, con pull-up interno
+// Contactos magneticos (MC-38). Cada uno va entre su pin y GND, con pull-up
+// interno. Para agregar otro, anade una linea con un identificador unico y un
+// pin libre. Si es puerta o ventana se elige despues en la aplicacion.
+struct ContactoCfg {
+  const char* id;
+  const char* zona;
+  int pin;
+};
+const ContactoCfg CONTACTOS[] = {
+  { "sensor-puerta-01",  "entrada", 4 },
+  { "sensor-ventana-01", "sala",    3 },
+};
+const int NUM_CONTACTOS = sizeof(CONTACTOS) / sizeof(CONTACTOS[0]);
+const int MAX_CONTACTOS = 6;
 const int PIN_PIR      = 5;   // salida del AM312, activa en alto
 const int PIN_LED      = -1;  // LED de estado opcional (-1 si no hay). Ej. 8 en algunas placas
 
@@ -92,9 +103,9 @@ struct __attribute__((packed)) PaqueteSensor {
 
 // ===================== Estado interno =====================
 
-int  contactoEstable = HIGH;
-int  contactoPrevio  = HIGH;
-unsigned long tCambioContacto = 0;
+int  contactoEstable[MAX_CONTACTOS];
+int  contactoPrevio[MAX_CONTACTOS];
+unsigned long tCambioContacto[MAX_CONTACTOS];
 
 volatile bool pirPulso = false;
 bool pirListo = false;
@@ -114,7 +125,7 @@ uint32_t secuencia = 0;
 volatile bool envioTerminado = false;
 volatile bool envioOk = false;
 
-const int CAP_COLA = 10;
+const int CAP_COLA = 16;
 PaqueteSensor cola[CAP_COLA];
 int colaTam = 0;
 
@@ -263,14 +274,19 @@ void setup() {
   Serial.begin(115200);
   delay(300);
 
-  pinMode(PIN_CONTACTO, INPUT_PULLUP);
+  for (int i = 0; i < NUM_CONTACTOS && i < MAX_CONTACTOS; i++) {
+    pinMode(CONTACTOS[i].pin, INPUT_PULLUP);
+  }
   // Entrada simple para el AM312: su salida es debil y un pull-down interno
   // la deja en un nivel intermedio.
   pinMode(PIN_PIR, INPUT);
   if (PIN_LED >= 0) pinMode(PIN_LED, OUTPUT);
 
-  contactoEstable = digitalRead(PIN_CONTACTO);
-  contactoPrevio = contactoEstable;
+  for (int i = 0; i < NUM_CONTACTOS && i < MAX_CONTACTOS; i++) {
+    contactoEstable[i] = digitalRead(CONTACTOS[i].pin);
+    contactoPrevio[i] = contactoEstable[i];
+    tCambioContacto[i] = 0;
+  }
 
   secuencia = esp_random();   // evita repetir numeros tras un reinicio
 
@@ -278,8 +294,11 @@ void setup() {
   Serial.println("==========================================");
   Serial.println(" Nodo periferico ESP32-C3");
   Serial.print(" Nodo: "); Serial.println(NODO_ID);
-  Serial.print(" Contacto: GPIO "); Serial.print(PIN_CONTACTO);
-  Serial.print("   PIR: GPIO "); Serial.println(PIN_PIR);
+  for (int i = 0; i < NUM_CONTACTOS && i < MAX_CONTACTOS; i++) {
+    Serial.print(" Contacto "); Serial.print(CONTACTOS[i].id);
+    Serial.print(": GPIO "); Serial.println(CONTACTOS[i].pin);
+  }
+  Serial.print(" PIR "); Serial.print(ID_PIR); Serial.print(": GPIO "); Serial.println(PIN_PIR);
   Serial.println("==========================================");
 
   if (!iniciarEspNow()) {
@@ -297,20 +316,23 @@ void setup() {
 void loop() {
   unsigned long ahora = millis();
 
-  // ---- Contacto magnetico con filtrado de rebote ----
-  int lectura = digitalRead(PIN_CONTACTO);
-  if (lectura != contactoPrevio) {
-    tCambioContacto = ahora;
-    contactoPrevio = lectura;
-  }
-  if ((ahora - tCambioContacto) > DEBOUNCE_MS && lectura != contactoEstable) {
-    contactoEstable = lectura;
-    int valor = (contactoEstable == HIGH) ? 1 : 0;   // abierto = 1
-    Serial.print("[Contacto] ");
-    Serial.println(valor ? "ABIERTO" : "CERRADO");
-    PaqueteSensor p;
-    llenarPaquete(p, TIPO_EVENTO, ID_CONTACTO, "estado_puerta", ZONA_CONTACTO, valor);
-    encolar(p);
+  // ---- Contactos magneticos con filtrado de rebote ----
+  for (int i = 0; i < NUM_CONTACTOS && i < MAX_CONTACTOS; i++) {
+    int lectura = digitalRead(CONTACTOS[i].pin);
+    if (lectura != contactoPrevio[i]) {
+      tCambioContacto[i] = ahora;
+      contactoPrevio[i] = lectura;
+    }
+    if ((ahora - tCambioContacto[i]) > DEBOUNCE_MS && lectura != contactoEstable[i]) {
+      contactoEstable[i] = lectura;
+      int valor = (lectura == HIGH) ? 1 : 0;   // abierto = 1
+      Serial.print("[Contacto] ");
+      Serial.print(CONTACTOS[i].id);
+      Serial.println(valor ? " ABIERTO" : " CERRADO");
+      PaqueteSensor p;
+      llenarPaquete(p, TIPO_EVENTO, CONTACTOS[i].id, "estado_puerta", CONTACTOS[i].zona, valor);
+      encolar(p);
+    }
   }
 
   // ---- Sensor de movimiento ----
@@ -359,9 +381,11 @@ void loop() {
   if (enlazado && (tUltimoLatido == 0 || ahora - tUltimoLatido > INTERVALO_LATIDO_MS)) {
     tUltimoLatido = ahora ? ahora : 1;
     PaqueteSensor p;
-    llenarPaquete(p, TIPO_ESTADO, ID_CONTACTO, "estado_puerta", ZONA_CONTACTO,
-                  contactoEstable == HIGH ? 1 : 0);
-    encolar(p);
+    for (int i = 0; i < NUM_CONTACTOS && i < MAX_CONTACTOS; i++) {
+      llenarPaquete(p, TIPO_ESTADO, CONTACTOS[i].id, "estado_puerta", CONTACTOS[i].zona,
+                    contactoEstable[i] == HIGH ? 1 : 0);
+      encolar(p);
+    }
     if (!registroPirEnviado && pirListo) {
       llenarPaquete(p, TIPO_ESTADO, ID_PIR, "movimiento", ZONA, 0);
       encolar(p);

@@ -421,8 +421,10 @@ backend y el que decide la alarma.
 
 | Sensor | Pin del sensor | Pin del ESP32-C3 |
 |---|---|---|
-| MC-38 | un cable | GPIO 4 |
-| MC-38 | otro cable | GND |
+| MC-38 puerta | un cable | GPIO 4 |
+| MC-38 puerta | otro cable | GND |
+| MC-38 ventana | un cable | GPIO 3 |
+| MC-38 ventana | otro cable | GND |
 | AM312 | VCC | 3V3 (o 5V) |
 | AM312 | VOUT | GPIO 5 |
 | AM312 | GND | GND |
@@ -436,7 +438,9 @@ En el C3 evita los GPIO 2, 8 y 9 (arranque) y el 18 y 19 (USB).
 3. El C3 imprime `[Enlace] Receptor encontrado en el canal N`. Si no aparece, revisa la MAC.
 4. Espera 45 s a que el PIR se estabilice. El receptor mostrará `[ESP-NOW] evento de nodo-c3-01: ...` con cada apertura o movimiento.
 
-El C3 busca solo el canal del receptor (el del router) y lo vuelve a buscar si cambia. Si el receptor está apagado, guarda hasta 10 eventos y los manda al volver.
+El C3 busca solo el canal del receptor (el del router) y lo vuelve a buscar si cambia. Si el receptor está apagado, guarda hasta 16 eventos y los manda al volver.
+
+**Más contactos (otra puerta o ventana).** En `nodo_c3.ino` añade una línea a la tabla `CONTACTOS` con un identificador único y un pin libre, por ejemplo `{ "sensor-ventana-02", "cocina", 6 }` (hasta 6 contactos). Recarga el C3 y el sensor aparece solo en la aplicación; ahí eliges si es puerta o ventana. El receptor admite hasta 8 sensores remotos.
 
 Con los mismos `sensorId` (`sensor-puerta-01`, `pir-sala-01`) la aplicación conserva los nombres y el historial.
 Si quieres que el receptor también lea sensores propios, pon `USAR_SENSORES_LOCALES = true`.
