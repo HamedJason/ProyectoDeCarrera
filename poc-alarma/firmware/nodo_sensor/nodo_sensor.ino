@@ -122,6 +122,31 @@ Pir pirs[] = {
 };
 const int NUM_PIRS = USAR_SENSORES_LOCALES ? (int)(sizeof(pirs) / sizeof(pirs[0])) : 0;
 
+// ===================== Tipos del protocolo ESP-NOW =====================
+// Se definen aqui, antes de cualquier funcion, porque el Arduino IDE genera los
+// prototipos de las funciones al inicio del archivo y necesita conocer estos tipos.
+
+// Debe ser IDENTICO en nodo_c3.ino
+const uint8_t TIPO_EVENTO = 1;
+const uint8_t TIPO_ESTADO = 2;
+const uint8_t TIPO_HOLA   = 3;
+
+struct __attribute__((packed)) PaqueteSensor {
+  uint8_t  magia[2];
+  uint8_t  version;
+  uint8_t  tipo;
+  uint32_t secuencia;
+  char     nodoId[16];
+  char     sensorId[24];
+  char     variable[16];
+  char     zona[16];
+  int8_t   valor;
+};
+
+struct OrigenRemoto { uint8_t mac[6]; uint32_t ultimaSecuencia; bool usado; };
+struct EstadoRemoto { char sensorId[24]; int valor; bool usado; };
+
+
 // ===================== Parametros de procesamiento =====================
 
 const unsigned long DEBOUNCE_MS   = 50;     // filtrado de rebote del contacto
@@ -547,23 +572,6 @@ void actualizarSalida() {
 
 // ===================== Recepcion de nodos perifericos (ESP-NOW) =====================
 
-// Debe ser IDENTICO en nodo_c3.ino
-const uint8_t TIPO_EVENTO = 1;
-const uint8_t TIPO_ESTADO = 2;
-const uint8_t TIPO_HOLA   = 3;
-
-struct __attribute__((packed)) PaqueteSensor {
-  uint8_t  magia[2];
-  uint8_t  version;
-  uint8_t  tipo;
-  uint32_t secuencia;
-  char     nodoId[16];
-  char     sensorId[24];
-  char     variable[16];
-  char     zona[16];
-  int8_t   valor;
-};
-
 // La funcion de recepcion corre en la tarea de Wi-Fi, no en el ciclo principal.
 // Solo copia el paquete a una cola; el ciclo lo procesa cuando puede, porque
 // procesar un evento hace peticiones HTTP que pueden tardar varios segundos.
@@ -597,7 +605,6 @@ void alRecibirEspNow(const uint8_t* mac, const uint8_t* datos, int largo) {
 
 // Los reintentos del nodo periferico llegan con el mismo numero de secuencia.
 // Se descartan comparando con el ultimo aceptado de cada origen.
-struct OrigenRemoto { uint8_t mac[6]; uint32_t ultimaSecuencia; bool usado; };
 OrigenRemoto origenes[4];
 
 bool esDuplicado(const uint8_t* mac, uint32_t secuencia) {
@@ -621,7 +628,6 @@ bool esDuplicado(const uint8_t* mac, uint32_t secuencia) {
 
 // Ultimo estado conocido de cada sensor remoto, para registrar el primero sin
 // disparar alarma y detectar cambios perdidos.
-struct EstadoRemoto { char sensorId[24]; int valor; bool usado; };
 EstadoRemoto estadosRemotos[8];
 
 EstadoRemoto* buscarEstado(const char* sensorId) {
