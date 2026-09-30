@@ -93,6 +93,7 @@ struct Pir {
   int pin;
   volatile bool pulso;     // lo levanta la interrupcion
   unsigned long tUltimo;   // ultimo evento aceptado
+  int previa;              // lectura anterior, para detectar el flanco por sondeo
 };
 
 Pir pirs[] = {
@@ -524,10 +525,10 @@ void setup() {
   for (int i = 0; i < NUM_CONTACTOS; i++) {
     pinMode(contactos[i].pin, INPUT_PULLUP);
   }
-  // Pull-down interno: si el cable del sensor se desconecta, la lectura es 0
-  // y no un valor flotante que dispare eventos falsos.
+  // Entrada simple, igual que en el sketch de prueba que si funciono. El AM312
+  // maneja su salida activamente, asi que no necesita resistencias internas.
   for (int i = 0; i < NUM_PIRS; i++) {
-    pinMode(pirs[i].pin, INPUT_PULLDOWN);
+    pinMode(pirs[i].pin, INPUT);
   }
   pinMode(PIN_SALIDA, OUTPUT);
   digitalWrite(PIN_SALIDA, LOW);
@@ -603,11 +604,17 @@ void loop() {
           Serial.print(pirs[i].pin);
           Serial.print(". Lectura inicial: ");
           Serial.println(digitalRead(pirs[i].pin));
+          pirs[i].previa = digitalRead(pirs[i].pin);
         }
       }
     } else {
       for (int i = 0; i < NUM_PIRS; i++) {
         Pir &p = pirs[i];
+        // Respaldo por sondeo: si la interrupcion no llegara a dispararse, el
+        // flanco de subida se detecta igual leyendo el pin en cada ciclo.
+        int lect = digitalRead(p.pin);
+        if (lect == HIGH && p.previa == LOW) p.pulso = true;
+        p.previa = lect;
         if (!p.pulso) continue;
         p.pulso = false;
         Serial.print("[PIR] Pulso detectado en ");
