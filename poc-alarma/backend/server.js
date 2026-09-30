@@ -15,6 +15,7 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const webpush = require('web-push');
 const { pool, inicializarEsquema } = require('./db');
 
 const app = express();
@@ -436,13 +437,89 @@ function describirMotivo(variable, zona) {
   return `Actividad detectada${lugar}`;
 }
 
+// ===================== Notificaciones push =====================
+
 /*
- * Envia una notificacion push mediante ntfy.
+ * Web Push: el servidor envia el aviso al servicio de push del telefono
+ * (Apple en iOS, Google en Android) y el sistema lo muestra aunque la app
+ * este cerrada. Requiere HTTPS y que el navegador haya guardado una
+ * suscripcion (tabla suscripciones_push).
+ *
+ * Las claves VAPID identifican a este servidor ante esos servicios. Pueden
+ * venir de las variables VAPID_PUBLIC_KEY y VAPID_PRIVATE_KEY; si no existen
+ * se generan una vez y se guardan en la base de datos.
+ */
+let claveVapidPublica = '';
+let pushListo = false;
+
+async function iniciarPush() {
+  try {
+    let publica = process.env.VAPID_PUBLIC_KEY;
+    let privada = process.env.VAPID_PRIVATE_KEY;
+    if (!publica || !privada) {
+      const r = await pool.query("SELECT clave, valor FROM ajustes_servidor WHERE clave IN ('vapid_publica','vapid_privada')");
+      const guardadas = Object.fromEntries(r.rows.map((f) => [f.clave, f.valor]));
+      if (guardadas.vapid_publica && guardadas.vapid_privada) {
+        publica = guardadas.vapid_publica;
+        privada = guardadas.vapid_privada;
+      } else {
+        const k = webpush.generateVAPIDKeys();
+        publica = k.publicKey;
+        privada = k.privateKey;
+        await pool.query(
+          "INSERT INTO ajustes_servidor (clave, valor) VALUES ('vapid_publica', $1), ('vapid_privada', $2) ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor",
+          [publica, privada]
+        );
+        console.log('Claves VAPID generadas y guardadas.');
+      }
+    }
+    // Apple exige un contacto valido (mailto: o https:)
+    const contacto = process.env.VAPID_SUBJECT || 'mailto:alarma@example.com';
+    webpush.setVapidDetails(contacto, publica, privada);
+    claveVapidPublica = publica;
+    pushListo = true;
+    console.log('Notificaciones push (Web Push) listas.');
+  } catch (e) {
+    console.error('No se pudo iniciar Web Push:', e.message);
+  }
+}
+
+async function enviarPush(sub, carga) {
+  try {
+    await webpush.sendNotification(
+      { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+      JSON.stringify(carga),
+      { TTL: 300, urgency: 'high' }
+    );
+    return true;
+  } catch (e) {
+    // 404 y 410: la suscripcion ya no existe (app desinstalada o permiso retirado)
+    if (e.statusCode === 404 || e.statusCode === 410) {
+      await pool.query('DELETE FROM suscripciones_push WHERE endpoint = $1', [sub.endpoint]).catch(() => {});
+      console.log('Suscripcion push caducada eliminada.');
+    } else {
+      console.error(`Fallo al enviar push (codigo ${e.statusCode || '-'}):`, e.message);
+    }
+    return false;
+  }
+}
+
+async function notificarPush(viviendaId, titulo, mensaje, etiqueta) {
+  if (!pushListo) return;
+  const r = await pool.query('SELECT endpoint, p256dh, auth FROM suscripciones_push WHERE vivienda_id = $1', [viviendaId]);
+  if (r.rows.length === 0) return;
+  const carga = { titulo, cuerpo: mensaje, etiqueta: etiqueta || 'alarma', url: '/' };
+  const resultados = await Promise.all(r.rows.map((s) => enviarPush(s, carga)));
+  console.log(`Push enviado a ${resultados.filter(Boolean).length} de ${r.rows.length} dispositivo(s).`);
+}
+
+/*
+ * Envia un aviso por Web Push y, si NTFY_TOPIC esta definido, tambien por ntfy.
  * No se espera su resultado dentro de la peticion: si el servicio de avisos
  * falla o tarda, la alarma no debe retrasarse ni fallar por eso.
- * Se publica como JSON para que los acentos lleguen bien al telefono.
  */
-function notificar(titulo, mensaje, prioridad = 5, etiquetas = ['rotating_light']) {
+function notificar(viviendaId, titulo, mensaje, prioridad = 5, etiquetas = ['rotating_light']) {
+  notificarPush(viviendaId, titulo, mensaje, 'alarma').catch((e) => console.error('Push:', e.message));
   if (!NTFY_TOPIC) return;
   fetch(NTFY_URL, {
     method: 'POST',
@@ -452,9 +529,9 @@ function notificar(titulo, mensaje, prioridad = 5, etiquetas = ['rotating_light'
   })
     .then((r) => {
       if (!r.ok) console.error(`Notificacion rechazada por ntfy (codigo ${r.status}).`);
-      else console.log('Notificacion enviada.');
+      else console.log('Notificacion ntfy enviada.');
     })
-    .catch((e) => console.error('No se pudo enviar la notificacion:', e.message));
+    .catch((e) => console.error('No se pudo enviar la notificacion ntfy:', e.message));
 }
 
 /*
@@ -605,7 +682,7 @@ app.post('/alarma', async (req, res) => {
 
     if (activa && silenciosa === true) {
       await registrarAccion(vivienda_id, 'alarma_silenciosa', false, true, nodo_id || 'dispositivo');
-      notificar('Alarma en modo silencioso', `${texto}. Vivienda ${vivienda_id}. La sirena no sono.`, 4, ['warning']);
+      notificar(vivienda_id, 'Alarma en modo silencioso', `${texto}. Vivienda ${vivienda_id}. La sirena no sono.`, 4, ['warning']);
       return res.json({ ok: true, aplicada: false, mensaje: 'Alarma silenciosa registrada y notificada.', ...previo });
     }
 
@@ -624,7 +701,7 @@ app.post('/alarma', async (req, res) => {
       await registrarAccion(vivienda_id, activa ? 'alarma_activada' : 'alarma_terminada',
                             previo.alarma_activa, activa, nodo_id || 'dispositivo');
       if (activa) {
-        notificar('ALARMA ACTIVADA', `${texto}. Vivienda ${vivienda_id}.`, 5, ['rotating_light']);
+        notificar(vivienda_id, 'ALARMA ACTIVADA', `${texto}. Vivienda ${vivienda_id}.`, 5, ['rotating_light']);
       }
     }
     return res.json({ ok: true, aplicada: true, ...r.rows[0] });
@@ -678,7 +755,7 @@ app.post('/limpiar', async (req, res) => {
  * para mostrar u ocultar controles como el de limpiar el historial.
  */
 app.get('/configuracion', (_req, res) => {
-  res.json({ ok: true, modo_pruebas: MODO_PRUEBAS, notificaciones_push: Boolean(NTFY_TOPIC) });
+  res.json({ ok: true, modo_pruebas: MODO_PRUEBAS, notificaciones_push: pushListo || Boolean(NTFY_TOPIC), web_push: pushListo });
 });
 
 /*
@@ -752,6 +829,68 @@ app.post('/comando', async (req, res) => {
   }
 });
 
+/*
+ * Web Push: suscripcion de dispositivos.
+ * GET  /push/clave     clave publica VAPID, que el navegador necesita para suscribirse
+ * POST /push/suscribir guarda (o actualiza) la suscripcion de un dispositivo
+ * POST /push/cancelar  elimina la suscripcion de un dispositivo
+ * POST /push/prueba    envia una notificacion de prueba a un dispositivo
+ */
+app.get('/push/clave', (_req, res) => {
+  if (!pushListo) return res.status(503).json({ ok: false, mensaje: 'Las notificaciones push no estan disponibles en el servidor.' });
+  res.json({ ok: true, clave: claveVapidPublica });
+});
+
+function suscripcionValida(s) {
+  return s && typeof s.endpoint === 'string' && /^https:\/\//.test(s.endpoint) && s.endpoint.length < 1000 &&
+    s.keys && typeof s.keys.p256dh === 'string' && typeof s.keys.auth === 'string';
+}
+
+app.post('/push/suscribir', async (req, res) => {
+  const { vivienda_id, suscripcion } = req.body || {};
+  if (!vivienda_id || !suscripcionValida(suscripcion)) {
+    return res.status(400).json({ ok: false, mensaje: 'Suscripcion invalida.' });
+  }
+  try {
+    await pool.query(
+      `INSERT INTO suscripciones_push (vivienda_id, endpoint, p256dh, auth, agente)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (endpoint) DO UPDATE
+         SET vivienda_id = EXCLUDED.vivienda_id, p256dh = EXCLUDED.p256dh,
+             auth = EXCLUDED.auth, agente = EXCLUDED.agente`,
+      [vivienda_id, suscripcion.endpoint, suscripcion.keys.p256dh, suscripcion.keys.auth,
+       String(req.get('user-agent') || '').slice(0, 200)]
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, mensaje: 'No se pudo guardar la suscripcion.', detalle: e.message });
+  }
+});
+
+app.post('/push/cancelar', async (req, res) => {
+  const { endpoint } = req.body || {};
+  if (typeof endpoint !== 'string') return res.status(400).json({ ok: false, mensaje: 'Falta el endpoint.' });
+  try {
+    await pool.query('DELETE FROM suscripciones_push WHERE endpoint = $1', [endpoint]);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, mensaje: 'No se pudo cancelar la suscripcion.', detalle: e.message });
+  }
+});
+
+app.post('/push/prueba', async (req, res) => {
+  const { endpoint } = req.body || {};
+  if (!pushListo) return res.status(503).json({ ok: false, mensaje: 'Las notificaciones push no estan disponibles.' });
+  try {
+    const r = await pool.query('SELECT endpoint, p256dh, auth FROM suscripciones_push WHERE endpoint = $1', [endpoint || '']);
+    if (r.rows.length === 0) return res.status(404).json({ ok: false, mensaje: 'Este dispositivo no esta suscrito.' });
+    const ok = await enviarPush(r.rows[0], { titulo: 'Notificación de prueba', cuerpo: 'Las notificaciones push funcionan.', etiqueta: 'prueba', url: '/' });
+    res.json({ ok, mensaje: ok ? 'Enviada.' : 'El servicio de push rechazo el envio.' });
+  } catch (e) {
+    res.status(500).json({ ok: false, mensaje: 'No se pudo enviar la prueba.', detalle: e.message });
+  }
+});
+
 // ===================== Frontend =====================
 
 /*
@@ -759,7 +898,10 @@ app.post('/comando', async (req, res) => {
  * Esto evita configurar un despliegue aparte y hace que el origen sea el mismo,
  * por lo que el navegador no necesita permisos adicionales entre ambos.
  */
-app.use(express.static(path.join(__dirname, 'publico')));
+app.use(express.static(path.join(__dirname, 'publico'), {
+  // El service worker no debe quedar en cache para que las actualizaciones lleguen
+  setHeaders: (res, ruta) => { if (ruta.endsWith('sw.js')) res.setHeader('Cache-Control', 'no-cache'); }
+}));
 
 app.get('/', (_req, res) => {
   res.sendFile(path.join(__dirname, 'publico', 'index.html'));
@@ -773,6 +915,7 @@ app.use((req, res) => {
 
 inicializarEsquema()
   .then(migrarSensoresAntiguos)
+  .then(iniciarPush)
   .then(() => {
     app.listen(PUERTO, () => {
       console.log(`Backend escuchando en el puerto ${PUERTO}`);

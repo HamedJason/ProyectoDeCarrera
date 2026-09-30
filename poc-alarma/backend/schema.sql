@@ -95,3 +95,25 @@ CREATE TABLE IF NOT EXISTS sensores (
 -- Sensor que disparo la alarma en curso, para resaltarlo en la aplicacion.
 ALTER TABLE estado_vivienda
     ADD COLUMN IF NOT EXISTS alarma_sensor TEXT;
+
+-- ============================================================
+-- Notificaciones push (Web Push)
+-- ============================================================
+-- Claves VAPID del servidor. Se generan una sola vez al primer arranque y se
+-- conservan aqui para que las suscripciones existentes no se invaliden.
+CREATE TABLE IF NOT EXISTS ajustes_servidor (
+    clave TEXT PRIMARY KEY,
+    valor TEXT NOT NULL
+);
+
+-- Dispositivos que aceptaron recibir avisos. Cada navegador tiene un endpoint
+-- unico que entrega el servicio de push de su plataforma (Apple, Google, etc.).
+CREATE TABLE IF NOT EXISTS suscripciones_push (
+    id          SERIAL PRIMARY KEY,
+    vivienda_id TEXT        NOT NULL,
+    endpoint    TEXT        NOT NULL UNIQUE,
+    p256dh      TEXT        NOT NULL,
+    auth        TEXT        NOT NULL,
+    agente      TEXT,
+    creado_en   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

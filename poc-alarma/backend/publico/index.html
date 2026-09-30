@@ -386,6 +386,7 @@
     padding: 14px 2px; border-bottom: 1px solid var(--linea);
   }
   .fila:first-of-type { border-top: 1px solid var(--linea); }
+  .fila[hidden] { display: none; }
   .fila .titulo { font-weight: 600; font-size: 16px; }
   .fila .nota { font-size: 13px; color: var(--tinta-2); margin-top: 2px; max-width: 34ch; }
 
@@ -537,10 +538,17 @@
       <div class="fila">
         <div>
           <div class="titulo">Avisos en este dispositivo</div>
-          <div class="nota" id="nota-avisos">Vibración, sonido y notificación cuando suene la alarma</div>
+          <div class="nota" id="nota-avisos">Notificaciones push, sonido y vibración cuando suene la alarma</div>
         </div>
         <button class="interruptor" id="interruptor-avisos" role="switch" aria-checked="false"
                 aria-label="Avisos en este dispositivo" onclick="alternarAvisos()"></button>
+      </div>
+      <div class="fila" id="fila-prueba-push" hidden>
+        <div>
+          <div class="titulo">Probar notificación</div>
+          <div class="nota">Envía una notificación push a este dispositivo</div>
+        </div>
+        <button class="boton-texto" id="boton-prueba-push" onclick="probarPush()">Enviar</button>
       </div>
       <div class="fila">
         <div>
@@ -1120,11 +1128,120 @@ function pintarAvisos() {
   $('interruptor-avisos').setAttribute('aria-checked', String(avisosActivos));
 }
 
+/*
+ * Web Push. El navegador guarda una suscripcion en el servicio de push de su
+ * plataforma y la enviamos al servidor. En iPhone solo funciona cuando la
+ * pagina se agrego a la pantalla de inicio y se abre desde ese icono.
+ */
+let registroSw = null;
+let notaAvisosBase = '';
+
+const esIos = /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const esInstalada = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+
+function pushDisponible() {
+  return window.isSecureContext && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+}
+
+function base64AUint8(base64) {
+  const relleno = '='.repeat((4 - (base64.length % 4)) % 4);
+  const bin = atob((base64 + relleno).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+}
+
+async function registrarServiceWorker() {
+  if (!('serviceWorker' in navigator) || !window.isSecureContext) return null;
+  try {
+    registroSw = registroSw || await navigator.serviceWorker.register('sw.js');
+    await navigator.serviceWorker.ready;
+    return registroSw;
+  } catch (e) { return null; }
+}
+
+// Explica por que no hay push, o devuelve '' si todo esta disponible
+function motivoSinPush() {
+  if (!window.isSecureContext) return 'Las notificaciones push requieren abrir la app por HTTPS.';
+  if (esIos && !esInstalada) return 'En iPhone, agrega la app a la pantalla de inicio (Compartir → Agregar a inicio) y ábrela desde ahí para activar las notificaciones push.';
+  if (!pushDisponible()) return 'Este navegador no admite notificaciones push.';
+  if ('Notification' in window && Notification.permission === 'denied') return 'Las notificaciones están bloqueadas. Actívalas en Ajustes → Notificaciones para esta app.';
+  return '';
+}
+
+async function suscribirPush() {
+  const reg = await registrarServiceWorker();
+  if (!reg) throw new Error('No se pudo iniciar el servicio de notificaciones.');
+  const c = await pedir('/push/clave');
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) {
+    sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64AUint8(c.clave) });
+  }
+  await pedir('/push/suscribir', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ vivienda_id: VIVIENDA, suscripcion: sub.toJSON() })
+  });
+}
+
+async function cancelarPush() {
+  try {
+    const reg = await registrarServiceWorker();
+    const sub = reg && await reg.pushManager.getSubscription();
+    if (!sub) return;
+    await pedir('/push/cancelar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint: sub.endpoint })
+    }).catch(() => {});
+    await sub.unsubscribe();
+  } catch (e) { /* se ignora */ }
+}
+
+async function probarPush() {
+  const boton = $('boton-prueba-push');
+  boton.textContent = 'Enviando';
+  try {
+    const reg = await registrarServiceWorker();
+    const sub = reg && await reg.pushManager.getSubscription();
+    if (!sub) throw new Error('Este dispositivo no está suscrito.');
+    const r = await pedir('/push/prueba', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint: sub.endpoint })
+    });
+    if (!r || !r.ok) throw new Error((r && r.mensaje) || 'Este dispositivo no está suscrito. Apaga y vuelve a activar los avisos.');
+    boton.textContent = 'Enviada';
+  } catch (e) {
+    mostrarAviso(mensajeDeError(e));
+    boton.textContent = 'Enviar';
+    return;
+  }
+  setTimeout(() => { boton.textContent = 'Enviar'; }, 2500);
+}
+
+function pintarPush(nota) {
+  const conPush = avisosActivos && 'Notification' in window && Notification.permission === 'granted' && !motivoSinPush();
+  $('fila-prueba-push').hidden = !conPush;
+  if (nota !== undefined) $('nota-avisos').textContent = nota;
+}
+
 async function alternarAvisos() {
   avisosActivos = !avisosActivos;
   guardarPreferencia(avisosActivos);
   pintarAvisos();
-  if (!avisosActivos) return;
+  if (!avisosActivos) {
+    await cancelarPush();
+    pintarPush(notaAvisosBase);
+    return;
+  }
+
+  // El permiso debe pedirse directamente desde el toque, antes de cualquier
+  // otra espera, o iOS lo rechaza por no venir de un gesto del usuario
+  const motivo = motivoSinPush();
+  let permiso = 'Notification' in window ? Notification.permission : 'denied';
+  if (!motivo && permiso === 'default') {
+    try { permiso = await Notification.requestPermission(); } catch (e) { /* se ignora */ }
+  }
 
   // El audio solo se puede iniciar tras un gesto del usuario, como este toque
   try {
@@ -1132,11 +1249,28 @@ async function alternarAvisos() {
     if (contextoAudio.state === 'suspended') await contextoAudio.resume();
     sonar(0.15);
   } catch (e) { /* el navegador no soporta audio */ }
-
-  if (window.isSecureContext && 'Notification' in window && Notification.permission === 'default') {
-    try { await Notification.requestPermission(); } catch (e) { /* se ignora */ }
-  }
   if (navigator.vibrate) navigator.vibrate(120);
+
+  if (motivo) { pintarPush(motivo); return; }
+  if (permiso !== 'granted') { pintarPush('Permiso de notificaciones no concedido. Puedes activarlo en Ajustes → Notificaciones.'); return; }
+  try {
+    await suscribirPush();
+    pintarPush(notaAvisosBase);
+  } catch (e) {
+    pintarPush('No se pudo activar el push: ' + (e.message || 'error desconocido'));
+  }
+}
+
+// Al abrir la app, renueva la suscripcion por si el navegador cambio su direccion
+async function sincronizarPush() {
+  await registrarServiceWorker();
+  if (!avisosActivos) { pintarPush(); return; }
+  const motivo = motivoSinPush();
+  if (motivo) { pintarPush(motivo); return; }
+  if ('Notification' in window && Notification.permission === 'granted') {
+    try { await suscribirPush(); } catch (e) { /* se reintenta al abrir de nuevo */ }
+  }
+  pintarPush();
 }
 
 function sonar(duracion) {
@@ -1166,7 +1300,8 @@ function alertar(motivo) {
   if (navigator.vibrate) navigator.vibrate([300, 150, 300, 150, 300]);
   try { sonar(0.25); setTimeout(() => sonar(0.25), 400); setTimeout(() => sonar(0.25), 800); } catch (e) { /* sin audio */ }
 
-  if (window.isSecureContext && 'Notification' in window && Notification.permission === 'granted') {
+  // Con push activo el propio sistema ya muestra el aviso; esta es la alternativa sin push
+  if (!pushDisponible() && window.isSecureContext && 'Notification' in window && Notification.permission === 'granted') {
     try { new Notification('ALARMA ACTIVA', { body: (motivo || 'Se detectó actividad') + ' en ' + nombreVivienda(VIVIENDA), tag: 'alarma' }); } catch (e) { /* se ignora */ }
   }
 }
@@ -1185,9 +1320,10 @@ async function cargarConfiguracion() {
     const c = await pedir('/configuracion');
     if (!c) return;
     $('zona-pruebas').classList.toggle('visible', !!c.modo_pruebas);
-    $('nota-avisos').textContent = c.notificaciones_push
-      ? 'Vibración, sonido y notificación con la app abierta. Las notificaciones push del servidor están activas.'
-      : 'Vibración, sonido y notificación con la app abierta. Las notificaciones push del servidor están desactivadas.';
+    notaAvisosBase = c.web_push
+      ? 'Notificaciones push, sonido y vibración cuando suene la alarma'
+      : 'Sonido y vibración con la app abierta. Las notificaciones push no están disponibles en el servidor.';
+    pintarPush(notaAvisosBase);
   } catch (e) { /* se reintenta en el siguiente arranque */ }
 }
 
@@ -1225,7 +1361,7 @@ async function limpiarHistorial() {
 // ===================== Arranque =====================
 avisosActivos = leerPreferencia();
 pintarAvisos();
-cargarConfiguracion();
+cargarConfiguracion().then(sincronizarPush);
 refrescar();
 setInterval(refrescar, INTERVALO_MS);
 
