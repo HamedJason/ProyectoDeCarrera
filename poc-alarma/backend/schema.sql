@@ -42,6 +42,14 @@ CREATE TABLE IF NOT EXISTS estado_vivienda (
     actualizado_en   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Indica que hay una alarma sonando en este momento. La activa el nodo cuando
+-- un sensor dispara con el sistema armado, y la apaga la aplicacion, el
+-- desarmado o el fin del tiempo de sirena.
+-- Se agrega con ALTER para que una base creada antes de este cambio (por
+-- ejemplo la de la VPS) se actualice sin perder datos.
+ALTER TABLE estado_vivienda
+    ADD COLUMN IF NOT EXISTS alarma_activa BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- ============================================================
 -- Bitacora de acciones del usuario (RNF-11, trazabilidad)
 -- ============================================================

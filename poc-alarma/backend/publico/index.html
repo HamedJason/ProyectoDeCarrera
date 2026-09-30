@@ -92,6 +92,36 @@
   .boton.sirena { background: var(--rojo); }
   .boton.sirena.activa { background: var(--ambar); color: #2B1A00; }
 
+  /* ---- Alarma activa ---- */
+  #tarjeta-alarma {
+    display: none;
+    background: #4A1512; border: 2px solid var(--rojo);
+    border-radius: 16px; padding: 20px; margin-bottom: 14px;
+    animation: pulso 1s ease-in-out infinite;
+  }
+  #tarjeta-alarma.visible { display: block; }
+  #tarjeta-alarma .alarma-titulo { font-size: 26px; font-weight: 800; color: #FFD9D5; }
+  #tarjeta-alarma .alarma-detalle { font-size: 13px; color: #F1B7B0; margin-top: 6px; line-height: 1.5; }
+  .boton.apagar-alarma { background: #fff; color: #7A1A12; }
+  @keyframes pulso {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, .55); }
+    50%      { box-shadow: 0 0 0 10px rgba(231, 76, 60, 0); }
+  }
+
+  /* ---- Sensores ---- */
+  .sensores { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+  .sensor {
+    background: var(--panel); border: 1px solid var(--borde);
+    border-radius: 14px; padding: 14px 16px;
+  }
+  .sensor .nombre { font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--texto-tenue); }
+  .sensor .lectura { font-size: 19px; font-weight: 800; margin-top: 6px; }
+  .sensor .lectura.abierta { color: var(--rojo); }
+  .sensor .lectura.cerrada { color: var(--verde); }
+  .sensor .lectura.movimiento { color: var(--ambar); }
+  .sensor .lectura.sin-dato { color: var(--texto-tenue); font-size: 15px; font-weight: 600; }
+  .sensor .cuando { font-size: 12px; color: var(--texto-tenue); margin-top: 4px; }
+
   /* ---- Interruptor de modo silencioso ---- */
   .fila-opcion {
     display: flex; align-items: center; justify-content: space-between;
@@ -171,6 +201,13 @@
     <button onclick="refrescar(true)">Reintentar</button>
   </div>
 
+  <div id="tarjeta-alarma">
+    <div class="etiqueta" style="color:#F1B7B0">Alarma</div>
+    <div class="alarma-titulo">ALARMA ACTIVA</div>
+    <div class="alarma-detalle" id="alarma-detalle">Se detectó actividad con el sistema armado.</div>
+    <button class="boton apagar-alarma" id="boton-apagar-alarma" onclick="apagarAlarma()">Apagar alarma</button>
+  </div>
+
   <div class="estado desarmado" id="tarjeta-estado">
     <div class="etiqueta">Estado del sistema</div>
     <div class="estado-texto" id="estado-texto">--</div>
@@ -184,6 +221,19 @@
       <div class="nota">Registra y notifica sin activar la sirena</div>
     </div>
     <div class="interruptor" id="interruptor-silencio" onclick="alternarSilencio()"></div>
+  </div>
+
+  <div class="sensores">
+    <div class="sensor">
+      <div class="nombre">Puerta</div>
+      <div class="lectura sin-dato" id="sensor-puerta">Sin datos</div>
+      <div class="cuando" id="sensor-puerta-cuando"></div>
+    </div>
+    <div class="sensor">
+      <div class="nombre">Movimiento</div>
+      <div class="lectura sin-dato" id="sensor-movimiento">Sin datos</div>
+      <div class="cuando" id="sensor-movimiento-cuando"></div>
+    </div>
   </div>
 
   <div class="tarjeta">
@@ -209,10 +259,10 @@
 // La aplicación se sirve desde el mismo backend, por lo que las peticiones
 // van al mismo origen y no requieren una URL absoluta.
 const VIVIENDA = new URLSearchParams(location.search).get('vivienda') || 'casa-001';
-const INTERVALO_MS = 4000;
+const INTERVALO_MS = 2500;
 const TIEMPO_LIMITE_MS = 8000;
 
-let estado = { armado: false, modo_silencioso: false, actuador_activo: false };
+let estado = { armado: false, modo_silencioso: false, actuador_activo: false, alarma_activa: false };
 let ocupado = false;
 let fallosSeguidos = 0;
 
@@ -319,9 +369,41 @@ function pintarEstado() {
   document.getElementById('interruptor-silencio').className =
     'interruptor' + (estado.modo_silencioso ? ' activo' : '');
 
+  const alarma = document.getElementById('tarjeta-alarma');
+  alarma.classList.toggle('visible', !!estado.alarma_activa);
+
   const sirena = document.getElementById('boton-sirena');
   sirena.textContent = estado.actuador_activo ? 'Apagar sirena' : 'Probar sirena';
   sirena.className = 'boton sirena' + (estado.actuador_activo ? ' activa' : '');
+}
+
+// Muestra la lectura mas reciente de cada sensor, tomada del historial
+function pintarSensores(mediciones) {
+  const puerta = mediciones.find(m => m.variable === 'estado_puerta');
+  const mov = mediciones.find(m => m.variable === 'movimiento');
+
+  const pp = document.getElementById('sensor-puerta');
+  if (puerta) {
+    const i = interpretar(puerta);
+    pp.textContent = Number(puerta.valor) === 1 ? 'Abierta' : 'Cerrada';
+    pp.className = 'lectura ' + i.clase;
+    document.getElementById('sensor-puerta-cuando').textContent = hace(puerta.creado_en);
+  } else {
+    pp.textContent = 'Sin datos';
+    pp.className = 'lectura sin-dato';
+    document.getElementById('sensor-puerta-cuando').textContent = '';
+  }
+
+  const pm = document.getElementById('sensor-movimiento');
+  if (mov) {
+    pm.textContent = 'Detectado';
+    pm.className = 'lectura movimiento';
+    document.getElementById('sensor-movimiento-cuando').textContent = hace(mov.creado_en);
+  } else {
+    pm.textContent = 'Sin detecciones';
+    pm.className = 'lectura sin-dato';
+    document.getElementById('sensor-movimiento-cuando').textContent = '';
+  }
 }
 
 function pintarEventos(mediciones) {
@@ -370,7 +452,9 @@ async function refrescar(manual = false) {
     ]);
 
     if (est) { estado = est; pintarEstado(); }
-    pintarEventos(med && med.mediciones ? med.mediciones : []);
+    const lista = med && med.mediciones ? med.mediciones : [];
+    pintarSensores(lista);
+    pintarEventos(lista);
 
     fallosSeguidos = 0;
     ocultarAviso();
@@ -405,6 +489,7 @@ async function cambiarEstado(cambios) {
 const alternarArmado  = () => cambiarEstado({ armado: !estado.armado });
 const alternarSilencio = () => cambiarEstado({ modo_silencioso: !estado.modo_silencioso });
 const alternarSirena   = () => cambiarEstado({ actuador_activo: !estado.actuador_activo });
+const apagarAlarma     = () => cambiarEstado({ alarma_activa: false });
 
 // ===================== Arranque =====================
 refrescar();

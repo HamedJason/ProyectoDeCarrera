@@ -223,7 +223,7 @@ async function obtenerEstado(viviendaId) {
     `INSERT INTO estado_vivienda (vivienda_id)
      VALUES ($1)
      ON CONFLICT (vivienda_id) DO UPDATE SET vivienda_id = EXCLUDED.vivienda_id
-     RETURNING vivienda_id, armado, modo_silencioso, actuador_activo, actualizado_en`,
+     RETURNING vivienda_id, armado, modo_silencioso, actuador_activo, alarma_activa, actualizado_en`,
     [viviendaId]
   );
   return r.rows[0];
@@ -258,25 +258,30 @@ app.get('/estado', async (req, res) => {
 
 /*
  * POST /estado
- * La aplicacion cambia el armado, el modo silencioso o la salida audible.
+ * La aplicacion cambia el armado, el modo silencioso o la salida audible, y
+ * puede apagar una alarma que este sonando.
  * Se aceptan cambios parciales: lo que no venga en la peticion no se modifica.
  */
 app.post('/estado', async (req, res) => {
-  const { vivienda_id, armado, modo_silencioso, actuador_activo, usuario } = req.body || {};
+  const { vivienda_id, armado, modo_silencioso, actuador_activo, alarma_activa, usuario } = req.body || {};
 
   if (!vivienda_id) {
     return res.status(400).json({ ok: false, mensaje: 'Falta el campo obligatorio "vivienda_id".' });
   }
 
-  const campos = { armado, modo_silencioso, actuador_activo };
+  const campos = { armado, modo_silencioso, actuador_activo, alarma_activa };
   const errores = [];
   for (const [nombre, valor] of Object.entries(campos)) {
     if (valor !== undefined && typeof valor !== 'boolean') {
       errores.push(`El campo "${nombre}" debe ser true o false.`);
     }
   }
+  // Una alarma solo la dispara un sensor. Desde la aplicacion unicamente se apaga.
+  if (alarma_activa === true) {
+    errores.push('La alarma solo puede activarla un sensor. Desde la aplicacion unicamente puede apagarse (alarma_activa: false).');
+  }
   if (Object.values(campos).every(v => v === undefined)) {
-    errores.push('Debe indicarse al menos uno de los campos "armado", "modo_silencioso" o "actuador_activo".');
+    errores.push('Debe indicarse al menos uno de los campos "armado", "modo_silencioso", "actuador_activo" o "alarma_activa".');
   }
   if (errores.length > 0) {
     return res.status(400).json({ ok: false, mensaje: 'La solicitud es incorrecta.', errores });
@@ -288,13 +293,16 @@ app.post('/estado', async (req, res) => {
     const nuevoArmado = armado !== undefined ? armado : previo.armado;
     const nuevoSilencio = modo_silencioso !== undefined ? modo_silencioso : previo.modo_silencioso;
     const nuevoActuador = actuador_activo !== undefined ? actuador_activo : previo.actuador_activo;
+    // Desarmar el sistema tambien apaga la alarma que estuviera sonando
+    const nuevaAlarma = (alarma_activa === false || nuevoArmado === false) ? false : previo.alarma_activa;
 
     const r = await pool.query(
       `UPDATE estado_vivienda
-          SET armado = $2, modo_silencioso = $3, actuador_activo = $4, actualizado_en = NOW()
+          SET armado = $2, modo_silencioso = $3, actuador_activo = $4,
+              alarma_activa = $5, actualizado_en = NOW()
         WHERE vivienda_id = $1
-        RETURNING vivienda_id, armado, modo_silencioso, actuador_activo, actualizado_en`,
-      [vivienda_id, nuevoArmado, nuevoSilencio, nuevoActuador]
+        RETURNING vivienda_id, armado, modo_silencioso, actuador_activo, alarma_activa, actualizado_en`,
+      [vivienda_id, nuevoArmado, nuevoSilencio, nuevoActuador, nuevaAlarma]
     );
 
     // Solo se registran los cambios reales, no las confirmaciones del mismo valor
@@ -307,11 +315,61 @@ app.post('/estado', async (req, res) => {
     if (actuador_activo !== undefined && actuador_activo !== previo.actuador_activo) {
       await registrarAccion(vivienda_id, 'salida_audible', previo.actuador_activo, actuador_activo, usuario);
     }
+    if (alarma_activa === false && previo.alarma_activa) {
+      await registrarAccion(vivienda_id, 'apagar_alarma', true, false, usuario);
+    }
 
-    console.log(`Estado actualizado: ${vivienda_id} -> armado=${nuevoArmado} silencioso=${nuevoSilencio} salida=${nuevoActuador}`);
+    console.log(`Estado actualizado: ${vivienda_id} -> armado=${nuevoArmado} silencioso=${nuevoSilencio} salida=${nuevoActuador} alarma=${nuevaAlarma}`);
     return res.json({ ok: true, mensaje: 'Estado actualizado.', ...r.rows[0] });
   } catch (e) {
     return res.status(500).json({ ok: false, mensaje: 'No se pudo actualizar el estado.', detalle: e.message });
+  }
+});
+
+/*
+ * POST /alarma
+ * Lo usa el nodo para avisar que una alarma empezo o termino de sonar.
+ * Requiere el token del dispositivo, a diferencia de /estado, porque solo un
+ * sensor debe poder declarar una alarma.
+ *
+ * Si el nodo avisa una alarma pero el sistema ya no esta armado (por ejemplo
+ * el usuario lo desarmo justo en ese instante), no se marca la alarma. La
+ * respuesta sigue siendo correcta para que el nodo no reintente sin fin.
+ */
+app.post('/alarma', async (req, res) => {
+  if (req.header('X-Device-Token') !== DEVICE_TOKEN) {
+    return res.status(401).json({ ok: false, mensaje: 'Token de dispositivo invalido o ausente.' });
+  }
+
+  const { vivienda_id, activa, nodo_id } = req.body || {};
+  if (!vivienda_id) {
+    return res.status(400).json({ ok: false, mensaje: 'Falta el campo obligatorio "vivienda_id".' });
+  }
+  if (typeof activa !== 'boolean') {
+    return res.status(400).json({ ok: false, mensaje: 'El campo "activa" debe ser true o false.' });
+  }
+
+  try {
+    const previo = await obtenerEstado(vivienda_id);
+
+    if (activa && !previo.armado) {
+      return res.json({ ok: true, aplicada: false, mensaje: 'El sistema no esta armado. No se marco la alarma.', ...previo });
+    }
+
+    const r = await pool.query(
+      `UPDATE estado_vivienda SET alarma_activa = $2, actualizado_en = NOW()
+        WHERE vivienda_id = $1
+        RETURNING vivienda_id, armado, modo_silencioso, actuador_activo, alarma_activa, actualizado_en`,
+      [vivienda_id, activa]
+    );
+
+    if (activa !== previo.alarma_activa) {
+      await registrarAccion(vivienda_id, activa ? 'alarma_activada' : 'alarma_terminada',
+                            previo.alarma_activa, activa, nodo_id || 'dispositivo');
+    }
+    return res.json({ ok: true, aplicada: true, ...r.rows[0] });
+  } catch (e) {
+    return res.status(500).json({ ok: false, mensaje: 'No se pudo actualizar la alarma.', detalle: e.message });
   }
 });
 

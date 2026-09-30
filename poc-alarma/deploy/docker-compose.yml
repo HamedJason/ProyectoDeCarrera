@@ -39,11 +39,11 @@ services:
     build: ../backend
     container_name: alarma_backend
     restart: unless-stopped
-    # Se publica directamente en el puerto 8080 del servidor.
-    # Si ese puerto también estuviera ocupado, basta cambiar el número de la
-    # izquierda, por ejemplo "8090:3000", y ajustar la URL en el firmware.
+    # Se publica en el puerto BACKEND_PORT del servidor (8080 por defecto).
+    # Si ese puerto estuviera ocupado, define BACKEND_PORT en el archivo .env,
+    # por ejemplo BACKEND_PORT=8090, y ajusta la URL en el firmware.
     ports:
-      - "8080:3000"
+      - "${BACKEND_PORT:-8080}:3000"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       # La base viaja por la red interna de Docker, que no sale del servidor,

@@ -15,6 +15,13 @@
  * conecta directamente al ESP32 sin divisor de voltaje. A diferencia del
  * HC-SR501 no tiene ajustes y su retardo interno es fijo, de unos 2 segundos.
  *
+ * Flujo de la alarma:
+ *   1. Un sensor dispara con el sistema armado y el modo silencioso apagado.
+ *   2. La salida (LED o sirena) parpadea y el nodo avisa al backend (POST /alarma).
+ *   3. La aplicacion muestra ALARMA ACTIVA con el boton "Apagar alarma".
+ *   4. La alarma termina al apagarla desde la aplicacion, al desarmar el
+ *      sistema o al cumplirse el tiempo maximo de sirena.
+ *
  * Librerias necesarias (Gestor de librerias de Arduino IDE):
  *   - ArduinoJson (Benoit Blanchon), version 7.x
  * WiFi.h y HTTPClient.h vienen incluidas con el core de ESP32.
@@ -53,14 +60,24 @@ const bool USAR_PIR    = true;
 
 const unsigned long DEBOUNCE_MS   = 50;     // filtrado de rebote del contacto
 const unsigned long BLOQUEO_PIR_MS = 8000;  // espera minima entre eventos de movimiento
+// El AM312 necesita entre 30 y 60 s tras energizarse para estabilizarse. Durante
+// ese tiempo sus lecturas no son confiables y se ignoran.
+const unsigned long PIR_ESTABILIZACION_MS = 45000;
 const unsigned long INTERVALO_ESTADO_MS = 2000;
 const unsigned long TIMEOUT_HTTP_MS = 5000;
 const unsigned long INTERVALO_RECONEXION_MS = 10000;
 const int  MAX_REINTENTOS   = 3;
 const int  CAPACIDAD_BUFFER = 20;
 
-// Duracion de la sirena tras un evento de alarma, en milisegundos
-const unsigned long DURACION_SIRENA_MS = 15000;
+// Tiempo maximo que suena la alarma si nadie la apaga, en milisegundos
+const unsigned long DURACION_SIRENA_MS = 30000;
+
+// La salida parpadea para simular el sonido de una sirena. Con un LED se ve
+// como encendido y apagado. Con un relevador y una sirena real conviene poner
+// SALIDA_INTERMITENTE en false para que suene de forma continua.
+const bool SALIDA_INTERMITENTE = true;
+const unsigned long INTERVALO_PARPADEO_MS = 300;
+const unsigned long INTERVALO_REPORTE_ALARMA_MS = 1000;
 
 // ===================== Estado interno =====================
 
@@ -70,6 +87,7 @@ unsigned long tUltimoCambioPuerta = 0;
 
 int  lecturaPirPrevia = LOW;
 unsigned long tUltimoEventoPir = 0;
+bool pirListo = false;   // true cuando termino el tiempo de estabilizacion
 
 unsigned long tUltimoEstado = 0;
 unsigned long contadorRegistro = 0;
@@ -85,6 +103,12 @@ bool salidaManual    = false;   // activacion directa desde la aplicacion
 // Sirena disparada por un evento de alarma
 bool sirenaPorAlarma = false;
 unsigned long tInicioSirena = 0;
+
+// Coordinacion con el backend. El nodo decide localmente para que la alarma
+// suene aun sin Internet, y despues informa lo ocurrido.
+bool alarmaReportadaActiva = false;   // ultimo valor que el backend conoce
+bool alarmaConfirmada = false;        // el backend ya vio esta alarma como activa
+unsigned long tUltimoReporteAlarma = 0;
 
 bool wifiEstabaConectado = false;
 unsigned long tUltimoIntentoWiFi = 0;
@@ -259,6 +283,11 @@ void procesarEvento(const char* variable, const char* zona,
       Serial.println("   ALARMA en modo silencioso. Se registra sin activar la salida.");
     } else {
       Serial.println("   ALARMA. Se activa la salida audible.");
+      if (!sirenaPorAlarma) {
+        // Alarma nueva. Todavia no la conoce el backend.
+        alarmaConfirmada = false;
+        alarmaReportadaActiva = false;
+      }
       sirenaPorAlarma = true;
       tInicioSirena = millis();
     }
@@ -292,6 +321,58 @@ void procesarEvento(const char* variable, const char* zona,
 }
 
 /*
+ * Avisa al backend que la alarma empezo o termino.
+ * Devuelve true si el backend respondio correctamente.
+ */
+bool reportarAlarma(bool activa) {
+  if (WiFi.status() != WL_CONNECTED) return false;
+
+  HTTPClient http;
+  http.setTimeout(TIMEOUT_HTTP_MS);
+  http.begin(clienteRed, String(BACKEND_BASE) + "/alarma");
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("X-Device-Token", DEVICE_TOKEN);
+
+  JsonDocument doc;
+  doc["vivienda_id"] = VIVIENDA_ID;
+  doc["nodo_id"]     = NODO_ID;
+  doc["activa"]      = activa;
+  String cuerpo;
+  serializeJson(doc, cuerpo);
+
+  int codigo = http.POST(cuerpo);
+  http.end();
+
+  Serial.print("[Alarma] Aviso al backend activa=");
+  Serial.print(activa ? "true" : "false");
+  Serial.print(" codigo=");
+  Serial.println(codigo);
+
+  return (codigo == 200);
+}
+
+/*
+ * Mantiene al backend al tanto de si la alarma esta sonando. Si no hay
+ * conexion, el aviso queda pendiente y se reintenta despues.
+ */
+void sincronizarAlarma() {
+  if (alarmaReportadaActiva == sirenaPorAlarma) return;
+  if (WiFi.status() != WL_CONNECTED) return;
+  if (millis() - tUltimoReporteAlarma < INTERVALO_REPORTE_ALARMA_MS) return;
+
+  tUltimoReporteAlarma = millis();
+  if (reportarAlarma(sirenaPorAlarma)) alarmaReportadaActiva = sirenaPorAlarma;
+}
+
+void apagarAlarmaLocal(const char* motivo) {
+  if (!sirenaPorAlarma) return;
+  sirenaPorAlarma = false;
+  alarmaConfirmada = false;
+  Serial.print("[Alarma] Apagada. Motivo: ");
+  Serial.println(motivo);
+}
+
+/*
  * Consulta el estado de armado en el backend.
  * Se usa consulta periodica porque sobre HTTP no existe un canal permanente
  * hacia el dispositivo. En el prototipo alfa se sustituye por MQTT, donde el
@@ -314,10 +395,25 @@ void consultarEstado() {
       sistemaArmado  = doc["armado"]          | false;
       modoSilencioso = doc["modo_silencioso"] | false;
       salidaManual   = doc["actuador_activo"] | false;
+      bool alarmaRemota = doc["alarma_activa"] | false;
 
       if (armadoAntes != sistemaArmado) {
         Serial.print("[Estado] El sistema quedo ");
         Serial.println(sistemaArmado ? "ARMADO" : "DESARMADO");
+      }
+
+      if (sirenaPorAlarma) {
+        // Al desarmar, la alarma se apaga de inmediato
+        if (!sistemaArmado) {
+          apagarAlarmaLocal("el sistema se desarmo");
+        } else if (alarmaRemota) {
+          alarmaConfirmada = true;
+        } else if (alarmaConfirmada) {
+          // El backend la conocia como activa y ahora ya no: la apagaron
+          // desde la aplicacion. Si aun no la conocia, es un desfase normal
+          // porque el aviso todavia no llego, y no se debe apagar.
+          apagarAlarmaLocal("apagada desde la aplicacion");
+        }
       }
     }
   }
@@ -325,15 +421,21 @@ void consultarEstado() {
 }
 
 /*
- * La salida se enciende por dos motivos independientes: una alarma en curso,
- * o una activacion manual desde la aplicacion para probar la sirena.
+ * La salida se activa por dos motivos independientes: una alarma en curso, o
+ * una activacion manual desde la aplicacion para probar la sirena.
+ * Mientras esta activa parpadea, para simular el sonido de una sirena.
  */
 void actualizarSalida() {
   if (sirenaPorAlarma && millis() - tInicioSirena > DURACION_SIRENA_MS) {
-    sirenaPorAlarma = false;
-    Serial.println("[Salida] Fin del tiempo de sirena.");
+    apagarAlarmaLocal("se cumplio el tiempo maximo de sirena");
   }
-  digitalWrite(PIN_SALIDA, (sirenaPorAlarma || salidaManual) ? HIGH : LOW);
+
+  bool activa = sirenaPorAlarma || salidaManual;
+  bool nivel = false;
+  if (activa) {
+    nivel = SALIDA_INTERMITENTE ? ((millis() / INTERVALO_PARPADEO_MS) % 2 == 0) : true;
+  }
+  digitalWrite(PIN_SALIDA, nivel ? HIGH : LOW);
 }
 
 // ===================== setup / loop =====================
@@ -343,7 +445,9 @@ void setup() {
   delay(300);
 
   if (USAR_PUERTA) pinMode(PIN_PUERTA, INPUT_PULLUP);
-  if (USAR_PIR)    pinMode(PIN_PIR, INPUT);
+  // Pull-down interno: si el cable del sensor se desconecta, la lectura es 0
+  // y no un valor flotante que dispare eventos falsos.
+  if (USAR_PIR)    pinMode(PIN_PIR, INPUT_PULLDOWN);
   pinMode(PIN_SALIDA, OUTPUT);
   digitalWrite(PIN_SALIDA, LOW);
 
@@ -365,8 +469,9 @@ void setup() {
 
   // El AM312 necesita estabilizarse tras el encendido antes de ser fiable
   if (USAR_PIR) {
-    Serial.println("[PIR] Estabilizando el sensor, espera unos segundos.");
-    tUltimoEventoPir = millis();
+    Serial.print("[PIR] Estabilizando el sensor durante ");
+    Serial.print(PIR_ESTABILIZACION_MS / 1000);
+    Serial.println(" s. Sus lecturas se ignoran hasta entonces.");
   }
 
   iniciarWiFi();
@@ -393,16 +498,28 @@ void loop() {
 
   // ---- Sensor de movimiento ----
   if (USAR_PIR) {
-    int lectura = digitalRead(PIN_PIR);
+    if (!pirListo) {
+      // Se ignora durante la estabilizacion. Al terminar se toma la lectura
+      // actual como referencia, para no contar como evento un nivel alto que
+      // ya estaba presente.
+      if (millis() >= PIR_ESTABILIZACION_MS) {
+        pirListo = true;
+        lecturaPirPrevia = digitalRead(PIN_PIR);
+        Serial.print("[PIR] Listo. Lectura inicial: ");
+        Serial.println(lecturaPirPrevia);
+      }
+    } else {
+      int lectura = digitalRead(PIN_PIR);
 
-    // Solo interesa el flanco de subida, y con un bloqueo posterior para no
-    // inundar de eventos mientras alguien permanece en la habitacion
-    if (lectura == HIGH && lecturaPirPrevia == LOW &&
-        millis() - tUltimoEventoPir > BLOQUEO_PIR_MS) {
-      tUltimoEventoPir = millis();
-      procesarEvento("movimiento", "sala", "pir-sala-01", 1, true);
+      // Solo interesa el flanco de subida, y con un bloqueo posterior para no
+      // inundar de eventos mientras alguien permanece en la habitacion
+      if (lectura == HIGH && lecturaPirPrevia == LOW &&
+          millis() - tUltimoEventoPir > BLOQUEO_PIR_MS) {
+        tUltimoEventoPir = millis();
+        procesarEvento("movimiento", "sala", "pir-sala-01", 1, true);
+      }
+      lecturaPirPrevia = lectura;
     }
-    lecturaPirPrevia = lectura;
   }
 
   // ---- Red y sincronizacion, sin detener el ciclo ----
@@ -416,6 +533,7 @@ void loop() {
   }
 
   actualizarSalida();
+  sincronizarAlarma();
 
   delay(10);
 }
