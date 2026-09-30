@@ -7,6 +7,11 @@
  *                                                  -> consulta de estado
  *                                                  -> salida audible
  *
+ * Este nodo es el RECEPTOR: la unica placa conectada al Wi-Fi y al backend.
+ * Recibe por ESP-NOW los eventos de los nodos perifericos (nodo_c3.ino, un
+ * ESP32-C3 con los sensores) y ejecuta con ellos toda la logica de alarma.
+ * Tambien puede leer sensores propios si USAR_SENSORES_LOCALES es true.
+ *
  * Entradas soportadas (varias de cada una, se declaran en las tablas de abajo):
  *   - Contactos magneticos MC-38 en puertas o ventanas (contacto seco)
  *   - Sensores infrarrojos pasivos AM312 para movimiento
@@ -35,6 +40,8 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <esp_now.h>
+#include <esp_idf_version.h>
 
 // ===================== Configuracion editable =====================
 
@@ -50,6 +57,19 @@ const char* DEVICE_TOKEN  = "alarma-uabc-2026";
 // Identificacion logica dentro del modelo vivienda / zona / nodo / sensor
 const char* VIVIENDA_ID = "casa-001";
 const char* NODO_ID     = "nodo-01";
+
+// ===================== Nodos perifericos (ESP-NOW) =====================
+
+// Si es true, este nodo tambien lee los sensores de las tablas de abajo. Con el
+// ESP32-C3 encargado de los sensores se deja en false.
+const bool USAR_SENSORES_LOCALES = false;
+
+// Cifrado ESP-NOW (opcional). Debe coincidir con nodo_c3.ino. Si se activa,
+// hay que poner la MAC del C3 (la imprime en su Serial: "[MAC] Esta placa").
+const bool USAR_CIFRADO = false;
+const char* CLAVE_PMK = "pmk-uabc-2026-a1";   // exactamente 16 caracteres
+const char* CLAVE_LMK = "lmk-uabc-2026-b2";   // exactamente 16 caracteres
+uint8_t MAC_C3[6] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 
 // ===================== Hardware =====================
 
@@ -80,7 +100,7 @@ Contacto contactos[] = {
   // { "contacto-03", "cocina",   17, HIGH, HIGH, 0 },
   // { "contacto-04", "recamara", 21, HIGH, HIGH, 0 },
 };
-const int NUM_CONTACTOS = sizeof(contactos) / sizeof(contactos[0]);
+const int NUM_CONTACTOS = USAR_SENSORES_LOCALES ? (int)(sizeof(contactos) / sizeof(contactos[0])) : 0;
 
 /*
  * Sensores de movimiento AM312. Alimentacion 3.3 V, GND y OUT al pin.
@@ -100,7 +120,7 @@ Pir pirs[] = {
   { "pir-sala-01", "sala", 18, false, 0 },
   // { "pir-02", "pasillo", 19, false, 0 },
 };
-const int NUM_PIRS = sizeof(pirs) / sizeof(pirs[0]);
+const int NUM_PIRS = USAR_SENSORES_LOCALES ? (int)(sizeof(pirs) / sizeof(pirs[0])) : 0;
 
 // ===================== Parametros de procesamiento =====================
 
@@ -159,7 +179,8 @@ bool alarmaReportadaActiva = false;   // ultimo valor que el backend conoce
 bool alarmaConfirmada = false;        // el backend ya vio esta alarma como activa
 char motivoAlarma[20] = "";           // variable que disparo la alarma, para el aviso
 char zonaAlarma[20]   = "";
-char sensorAlarma[24] = "";           // sensor que disparo, para resaltarlo en la app
+char sensorAlarma[24] = "";
+char nodoAlarma[16]   = "";           // nodo que reporto el sensor que disparo           // sensor que disparo, para resaltarlo en la app
 unsigned long tUltimoReporteAlarma = 0;
 
 bool wifiEstabaConectado = false;
@@ -170,6 +191,7 @@ struct EventoPendiente {
   char          variable[20];
   char          zona[20];
   char          sensorId[24];
+  char          nodoId[16];
   int           valor;
 };
 
@@ -180,6 +202,7 @@ WiFiClient clienteRed;
 
 // Declaraciones adelantadas, porque se usan antes de su definicion
 bool enviarAlarma(bool activa, bool silenciosa);
+void iniciarEspNow();
 
 // ===================== Wi-Fi no bloqueante =====================
 
@@ -217,6 +240,7 @@ void iniciarWiFi() {
   Serial.print("[WiFi] Iniciando conexion a ");
   Serial.println(WIFI_SSID);
   WiFi.mode(WIFI_STA);
+  iniciarEspNow();
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   tUltimoIntentoWiFi = millis();
 }
@@ -224,8 +248,8 @@ void iniciarWiFi() {
 // ===================== Envio de mediciones =====================
 
 bool enviarMedicion(unsigned long numeroRegistro, const char* variable,
-                    const char* zona, const char* sensorId, int valor,
-                    long &latenciaMs) {
+                    const char* zona, const char* sensorId, const char* nodoId,
+                    int valor, long &latenciaMs) {
   if (WiFi.status() != WL_CONNECTED) return false;
 
   String url = String(BACKEND_BASE) + "/mediciones";
@@ -239,7 +263,7 @@ bool enviarMedicion(unsigned long numeroRegistro, const char* variable,
   JsonDocument doc;
   doc["vivienda_id"]     = VIVIENDA_ID;
   doc["zona"]            = zona;
-  doc["nodo_id"]         = NODO_ID;
+  doc["nodo_id"]         = nodoId;
   doc["sensor_id"]       = sensorId;
   doc["variable"]        = variable;
   doc["valor"]           = valor;
@@ -270,7 +294,7 @@ bool enviarMedicion(unsigned long numeroRegistro, const char* variable,
 }
 
 void guardarEnBuffer(unsigned long numeroRegistro, const char* variable,
-                     const char* zona, const char* sensorId, int valor) {
+                     const char* zona, const char* sensorId, const char* nodoId, int valor) {
   if (eventosEnBuffer >= CAPACIDAD_BUFFER) {
     Serial.println("[Buffer] Lleno. Se descarta el evento mas antiguo.");
     for (int i = 1; i < CAPACIDAD_BUFFER; i++) bufferEventos[i - 1] = bufferEventos[i];
@@ -282,6 +306,7 @@ void guardarEnBuffer(unsigned long numeroRegistro, const char* variable,
   strncpy(e.variable, variable, sizeof(e.variable) - 1);  e.variable[sizeof(e.variable) - 1] = '\0';
   strncpy(e.zona, zona, sizeof(e.zona) - 1);              e.zona[sizeof(e.zona) - 1] = '\0';
   strncpy(e.sensorId, sensorId, sizeof(e.sensorId) - 1);  e.sensorId[sizeof(e.sensorId) - 1] = '\0';
+  strncpy(e.nodoId, nodoId, sizeof(e.nodoId) - 1);        e.nodoId[sizeof(e.nodoId) - 1] = '\0';
   eventosEnBuffer++;
   Serial.print("[Buffer] Eventos pendientes: ");
   Serial.println(eventosEnBuffer);
@@ -295,7 +320,7 @@ void intentarVaciarBuffer() {
   for (int i = 0; i < eventosEnBuffer; i++) {
     long lat = 0;
     EventoPendiente &e = bufferEventos[i];
-    if (!enviarMedicion(e.numeroRegistro, e.variable, e.zona, e.sensorId, e.valor, lat)) break;
+    if (!enviarMedicion(e.numeroRegistro, e.variable, e.zona, e.sensorId, e.nodoId, e.valor, lat)) break;
     enviados++;
     enviosExitosos++;
   }
@@ -321,7 +346,7 @@ void intentarVaciarBuffer() {
  * lo que el modo silencioso suprime es el ruido, no la evidencia.
  */
 void procesarEvento(const char* variable, const char* zona,
-                    const char* sensorId, int valor, bool esAlarma) {
+                    const char* sensorId, const char* nodoId, int valor, bool esAlarma) {
   contadorRegistro++;
 
   Serial.print("[Evento] registro=");
@@ -333,7 +358,9 @@ void procesarEvento(const char* variable, const char* zona,
   Serial.print(" zona=");
   Serial.print(zona);
   Serial.print(" sensor=");
-  Serial.println(sensorId);
+  Serial.print(sensorId);
+  Serial.print(" nodo=");
+  Serial.println(nodoId);
 
   if (esAlarma && sistemaArmado) {
     if (modoSilencioso) {
@@ -341,6 +368,7 @@ void procesarEvento(const char* variable, const char* zona,
       strncpy(motivoAlarma, variable, sizeof(motivoAlarma) - 1); motivoAlarma[sizeof(motivoAlarma) - 1] = '\0';
       strncpy(zonaAlarma, zona, sizeof(zonaAlarma) - 1);         zonaAlarma[sizeof(zonaAlarma) - 1] = '\0';
       strncpy(sensorAlarma, sensorId, sizeof(sensorAlarma) - 1); sensorAlarma[sizeof(sensorAlarma) - 1] = '\0';
+      strncpy(nodoAlarma, nodoId, sizeof(nodoAlarma) - 1);       nodoAlarma[sizeof(nodoAlarma) - 1] = '\0';
       // Un solo intento. El evento ya queda registrado como medicion, y este
       // aviso solo sirve para la notificacion.
       enviarAlarma(true, true);
@@ -354,6 +382,7 @@ void procesarEvento(const char* variable, const char* zona,
       strncpy(motivoAlarma, variable, sizeof(motivoAlarma) - 1); motivoAlarma[sizeof(motivoAlarma) - 1] = '\0';
       strncpy(zonaAlarma, zona, sizeof(zonaAlarma) - 1);         zonaAlarma[sizeof(zonaAlarma) - 1] = '\0';
       strncpy(sensorAlarma, sensorId, sizeof(sensorAlarma) - 1); sensorAlarma[sizeof(sensorAlarma) - 1] = '\0';
+      strncpy(nodoAlarma, nodoId, sizeof(nodoAlarma) - 1);       nodoAlarma[sizeof(nodoAlarma) - 1] = '\0';
       sirenaPorAlarma = true;
       tInicioSirena = millis();
     }
@@ -369,7 +398,7 @@ void procesarEvento(const char* variable, const char* zona,
   } else {
     for (int intento = 1; intento <= MAX_REINTENTOS && !enviado; intento++) {
       if (intento > 1) { Serial.print("   [Reintento "); Serial.print(intento); Serial.println("]"); delay(500); }
-      enviado = enviarMedicion(contadorRegistro, variable, zona, sensorId, valor, latencia);
+      enviado = enviarMedicion(contadorRegistro, variable, zona, sensorId, nodoId, valor, latencia);
     }
   }
 
@@ -377,7 +406,7 @@ void procesarEvento(const char* variable, const char* zona,
     enviosExitosos++;
   } else {
     enviosFallidos++;
-    guardarEnBuffer(contadorRegistro, variable, zona, sensorId, valor);
+    guardarEnBuffer(contadorRegistro, variable, zona, sensorId, nodoId, valor);
   }
 
   Serial.print("[Contadores] exitosos=");
@@ -402,7 +431,7 @@ bool enviarAlarma(bool activa, bool silenciosa) {
 
   JsonDocument doc;
   doc["vivienda_id"] = VIVIENDA_ID;
-  doc["nodo_id"]     = NODO_ID;
+  doc["nodo_id"]     = nodoAlarma[0] ? nodoAlarma : NODO_ID;
   doc["activa"]      = activa;
   if (activa) {
     doc["motivo"]    = motivoAlarma;
@@ -516,6 +545,184 @@ void actualizarSalida() {
   digitalWrite(PIN_SALIDA, nivel ? HIGH : LOW);
 }
 
+// ===================== Recepcion de nodos perifericos (ESP-NOW) =====================
+
+// Debe ser IDENTICO en nodo_c3.ino
+const uint8_t TIPO_EVENTO = 1;
+const uint8_t TIPO_ESTADO = 2;
+const uint8_t TIPO_HOLA   = 3;
+
+struct __attribute__((packed)) PaqueteSensor {
+  uint8_t  magia[2];
+  uint8_t  version;
+  uint8_t  tipo;
+  uint32_t secuencia;
+  char     nodoId[16];
+  char     sensorId[24];
+  char     variable[16];
+  char     zona[16];
+  int8_t   valor;
+};
+
+// La funcion de recepcion corre en la tarea de Wi-Fi, no en el ciclo principal.
+// Solo copia el paquete a una cola; el ciclo lo procesa cuando puede, porque
+// procesar un evento hace peticiones HTTP que pueden tardar varios segundos.
+const int CAP_COLA_RX = 8;
+PaqueteSensor colaRx[CAP_COLA_RX];
+uint8_t colaRxMac[CAP_COLA_RX][6];
+volatile int rxEscribir = 0;
+volatile int rxLeer = 0;
+
+void guardarPaqueteRx(const uint8_t* mac, const uint8_t* datos, int largo) {
+  if (largo != (int)sizeof(PaqueteSensor)) return;
+  const PaqueteSensor* p = (const PaqueteSensor*)datos;
+  if (p->magia[0] != 'S' || p->magia[1] != 'R' || p->version != 1) return;
+  int sig = (rxEscribir + 1) % CAP_COLA_RX;
+  if (sig == rxLeer) return;   // cola llena: el nodo periferico reintentara
+  memcpy(&colaRx[rxEscribir], datos, sizeof(PaqueteSensor));
+  memcpy(colaRxMac[rxEscribir], mac, 6);
+  rxEscribir = sig;
+}
+
+// La firma de la funcion de recepcion cambio en IDF 5 (core ESP32 3.x)
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+void alRecibirEspNow(const esp_now_recv_info_t* info, const uint8_t* datos, int largo) {
+  guardarPaqueteRx(info->src_addr, datos, largo);
+}
+#else
+void alRecibirEspNow(const uint8_t* mac, const uint8_t* datos, int largo) {
+  guardarPaqueteRx(mac, datos, largo);
+}
+#endif
+
+// Los reintentos del nodo periferico llegan con el mismo numero de secuencia.
+// Se descartan comparando con el ultimo aceptado de cada origen.
+struct OrigenRemoto { uint8_t mac[6]; uint32_t ultimaSecuencia; bool usado; };
+OrigenRemoto origenes[4];
+
+bool esDuplicado(const uint8_t* mac, uint32_t secuencia) {
+  for (int i = 0; i < 4; i++) {
+    if (origenes[i].usado && memcmp(origenes[i].mac, mac, 6) == 0) {
+      if (origenes[i].ultimaSecuencia == secuencia) return true;
+      origenes[i].ultimaSecuencia = secuencia;
+      return false;
+    }
+  }
+  for (int i = 0; i < 4; i++) {
+    if (!origenes[i].usado) {
+      origenes[i].usado = true;
+      memcpy(origenes[i].mac, mac, 6);
+      origenes[i].ultimaSecuencia = secuencia;
+      return false;
+    }
+  }
+  return false;   // tabla llena: se acepta sin deduplicar
+}
+
+// Ultimo estado conocido de cada sensor remoto, para registrar el primero sin
+// disparar alarma y detectar cambios perdidos.
+struct EstadoRemoto { char sensorId[24]; int valor; bool usado; };
+EstadoRemoto estadosRemotos[8];
+
+EstadoRemoto* buscarEstado(const char* sensorId) {
+  for (int i = 0; i < 8; i++) {
+    if (estadosRemotos[i].usado && strcmp(estadosRemotos[i].sensorId, sensorId) == 0) return &estadosRemotos[i];
+  }
+  return nullptr;
+}
+
+EstadoRemoto* crearEstado(const char* sensorId, int valor) {
+  for (int i = 0; i < 8; i++) {
+    if (!estadosRemotos[i].usado) {
+      estadosRemotos[i].usado = true;
+      strncpy(estadosRemotos[i].sensorId, sensorId, sizeof(estadosRemotos[i].sensorId) - 1);
+      estadosRemotos[i].sensorId[sizeof(estadosRemotos[i].sensorId) - 1] = '\0';
+      estadosRemotos[i].valor = valor;
+      return &estadosRemotos[i];
+    }
+  }
+  return nullptr;
+}
+
+void procesarPaqueteRemoto(PaqueteSensor &p, const uint8_t* mac) {
+  if (p.tipo == TIPO_HOLA) return;
+
+  // Se garantiza el fin de cada texto antes de usarlo
+  p.nodoId[sizeof(p.nodoId) - 1] = '\0';
+  p.sensorId[sizeof(p.sensorId) - 1] = '\0';
+  p.variable[sizeof(p.variable) - 1] = '\0';
+  p.zona[sizeof(p.zona) - 1] = '\0';
+
+  bool esContacto = strcmp(p.variable, "estado_puerta") == 0;
+  bool esMovimiento = strcmp(p.variable, "movimiento") == 0;
+  if (!esContacto && !esMovimiento) return;
+  if (esDuplicado(mac, p.secuencia)) return;
+
+  Serial.print("[ESP-NOW] ");
+  Serial.print(p.tipo == TIPO_EVENTO ? "evento" : "estado");
+  Serial.print(" de ");
+  Serial.print(p.nodoId);
+  Serial.print(": ");
+  Serial.print(p.sensorId);
+  Serial.print(" valor=");
+  Serial.println(p.valor);
+
+  if (p.tipo == TIPO_EVENTO) {
+    EstadoRemoto* e = esContacto ? buscarEstado(p.sensorId) : nullptr;
+    if (esContacto) {
+      if (e) e->valor = p.valor; else crearEstado(p.sensorId, p.valor);
+    }
+    procesarEvento(p.variable, p.zona, p.sensorId, p.nodoId, p.valor, p.valor == 1);
+    return;
+  }
+
+  if (p.tipo == TIPO_ESTADO) {
+    EstadoRemoto* e = buscarEstado(p.sensorId);
+    if (!e) {
+      // Primera vez que se ve este sensor: se registra sin activar alarma
+      crearEstado(p.sensorId, p.valor);
+      procesarEvento(p.variable, p.zona, p.sensorId, p.nodoId, p.valor, false);
+    } else if (esContacto && e->valor != p.valor) {
+      // El contacto cambio y el evento se perdio en el camino
+      e->valor = p.valor;
+      procesarEvento(p.variable, p.zona, p.sensorId, p.nodoId, p.valor, p.valor == 1);
+    }
+  }
+}
+
+void atenderRemotos() {
+  while (rxLeer != rxEscribir) {
+    PaqueteSensor p;
+    uint8_t mac[6];
+    memcpy(&p, &colaRx[rxLeer], sizeof(p));
+    memcpy(mac, colaRxMac[rxLeer], 6);
+    rxLeer = (rxLeer + 1) % CAP_COLA_RX;
+    procesarPaqueteRemoto(p, mac);
+  }
+}
+
+void iniciarEspNow() {
+  Serial.print("[MAC] Esta placa (nodo receptor): ");
+  Serial.println(WiFi.macAddress());
+
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("[ESP-NOW] No se pudo iniciar. No se recibiran nodos perifericos.");
+    return;
+  }
+  if (USAR_CIFRADO) {
+    esp_now_set_pmk((const uint8_t*)CLAVE_PMK);
+    esp_now_peer_info_t par = {};
+    memcpy(par.peer_addr, MAC_C3, 6);
+    par.channel = 0;
+    par.ifidx = WIFI_IF_STA;
+    par.encrypt = true;
+    memcpy(par.lmk, CLAVE_LMK, 16);
+    if (esp_now_add_peer(&par) != ESP_OK) Serial.println("[ESP-NOW] No se pudo registrar el nodo C3 cifrado.");
+  }
+  esp_now_register_recv_cb(alRecibirEspNow);
+  Serial.println("[ESP-NOW] Escuchando nodos perifericos.");
+}
+
 // ===================== setup / loop =====================
 
 void setup() {
@@ -543,8 +750,7 @@ void setup() {
   Serial.println(" Nodo sensor - Sistema de seguridad");
   Serial.print(" Vivienda: "); Serial.println(VIVIENDA_ID);
   Serial.print(" Nodo:     "); Serial.println(NODO_ID);
-  Serial.print(" Sensores: ");
-  Serial.println();
+  Serial.println(USAR_SENSORES_LOCALES ? " Sensores locales:" : " Sensores locales: desactivados (los aporta el nodo C3 por ESP-NOW)");
   for (int i = 0; i < NUM_CONTACTOS; i++) {
     Serial.print("   contacto  "); Serial.print(contactos[i].sensorId);
     Serial.print(" (GPIO "); Serial.print(contactos[i].pin); Serial.print(", ");
@@ -583,7 +789,7 @@ void loop() {
       // Con pull-up: circuito abierto significa que el iman se separo, o sea
       // que la puerta o ventana se abrio. Esa es la condicion de alarma.
       int valor = (c.estable == HIGH) ? 1 : 0;
-      procesarEvento("estado_puerta", c.zona, c.sensorId, valor, valor == 1);
+      procesarEvento("estado_puerta", c.zona, c.sensorId, NODO_ID, valor, valor == 1);
     }
   }
 
@@ -624,7 +830,7 @@ void loop() {
         // permanece en la habitacion
         if (p.tUltimo == 0 || millis() - p.tUltimo > BLOQUEO_PIR_MS) {
           p.tUltimo = millis();
-          procesarEvento("movimiento", p.zona, p.sensorId, 1, true);
+          procesarEvento("movimiento", p.zona, p.sensorId, NODO_ID, 1, true);
         } else {
           Serial.println("   Ignorado por el bloqueo entre eventos de movimiento.");
         }

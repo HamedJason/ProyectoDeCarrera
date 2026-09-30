@@ -394,7 +394,7 @@ abre y el ESP32 lo lee como apertura.
 | ESP32 | AM312 |
 |---|---|
 | 3V3 | VCC |
-| GPIO 18 | OUT |
+| GPIO 5 | OUT |
 | GND | GND |
 
 El AM312 entrega 3.3 V en su salida, por lo que se conecta directo sin divisor.
@@ -406,6 +406,42 @@ mientras alguien permanece en la habitación.
 Al encenderlo tarda entre 30 y 60 segundos en estabilizarse. Durante ese lapso
 puede reportar movimiento sin causa real. Espera ese tiempo antes de medir
 falsos positivos.
+
+### Separar los sensores en un ESP32-C3 (ESP-NOW)
+
+Arquitectura: el ESP32-C3 lee el MC-38 y el AM312 y manda cada evento por
+ESP-NOW al ESP32 receptor, que sigue siendo el único conectado al Wi-Fi y al
+backend y el que decide la alarma.
+
+```
+[MC-38 + AM312] -> ESP32-C3 --ESP-NOW--> ESP32 receptor --Wi-Fi--> backend
+```
+
+**Conexiones del C3** (pines editables en `firmware/nodo_c3/nodo_c3.ino`):
+
+| Sensor | Pin del sensor | Pin del ESP32-C3 |
+|---|---|---|
+| MC-38 | un cable | GPIO 4 |
+| MC-38 | otro cable | GND |
+| AM312 | VCC | 3V3 (o 5V) |
+| AM312 | VOUT | GPIO 5 |
+| AM312 | GND | GND |
+
+En el C3 evita los GPIO 2, 8 y 9 (arranque) y el 18 y 19 (USB).
+
+**Puesta en marcha, en este orden:**
+
+1. Carga `firmware/nodo_sensor/nodo_sensor.ino` en el ESP32 receptor (con tu Wi-Fi y `BACKEND_BASE`). Abre el monitor serie y copia la línea `[MAC] Esta placa (nodo receptor): AA:BB:...`.
+2. En `firmware/nodo_c3/nodo_c3.ino` pon esa dirección en `MAC_RECEPTOR`, en formato `{ 0xAA, 0xBB, ... }`, y carga el sketch en el C3. Placa en el IDE: *ESP32C3 Dev Module* (activa *USB CDC On Boot* para ver el monitor serie).
+3. El C3 imprime `[Enlace] Receptor encontrado en el canal N`. Si no aparece, revisa la MAC.
+4. Espera 45 s a que el PIR se estabilice. El receptor mostrará `[ESP-NOW] evento de nodo-c3-01: ...` con cada apertura o movimiento.
+
+El C3 busca solo el canal del receptor (el del router) y lo vuelve a buscar si cambia. Si el receptor está apagado, guarda hasta 10 eventos y los manda al volver.
+
+Con los mismos `sensorId` (`sensor-puerta-01`, `pir-sala-01`) la aplicación conserva los nombres y el historial.
+Si quieres que el receptor también lea sensores propios, pon `USAR_SENSORES_LOCALES = true`.
+
+**Cifrado (opcional).** Pon `USAR_CIFRADO = true` en los dos sketches con las mismas claves de 16 caracteres, y en el receptor escribe la MAC del C3 en `MAC_C3` (la imprime el C3 al arrancar).
 
 ### Salida audible
 
