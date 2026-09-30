@@ -51,6 +51,11 @@ services:
       PGSSL: "off"
       DEVICE_TOKEN: ${DEVICE_TOKEN}
       PORT: "3000"
+      # Notificaciones push por ntfy. Sin NTFY_TOPIC no se envian avisos.
+      NTFY_URL: ${NTFY_URL:-https://ntfy.sh}
+      NTFY_TOPIC: ${NTFY_TOPIC:-}
+      # Habilita el boton de borrar historial. Solo para la etapa de pruebas.
+      MODO_PRUEBAS: ${MODO_PRUEBAS:-false}
     depends_on:
       db:
         condition: service_healthy

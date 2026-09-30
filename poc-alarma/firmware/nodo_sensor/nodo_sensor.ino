@@ -108,6 +108,8 @@ unsigned long tInicioSirena = 0;
 // suene aun sin Internet, y despues informa lo ocurrido.
 bool alarmaReportadaActiva = false;   // ultimo valor que el backend conoce
 bool alarmaConfirmada = false;        // el backend ya vio esta alarma como activa
+char motivoAlarma[20] = "";           // variable que disparo la alarma, para el aviso
+char zonaAlarma[20]   = "";
 unsigned long tUltimoReporteAlarma = 0;
 
 bool wifiEstabaConectado = false;
@@ -125,6 +127,9 @@ EventoPendiente bufferEventos[CAPACIDAD_BUFFER];
 int eventosEnBuffer = 0;
 
 WiFiClient clienteRed;
+
+// Declaraciones adelantadas, porque se usan antes de su definicion
+bool enviarAlarma(bool activa, bool silenciosa);
 
 // ===================== Wi-Fi no bloqueante =====================
 
@@ -280,7 +285,12 @@ void procesarEvento(const char* variable, const char* zona,
 
   if (esAlarma && sistemaArmado) {
     if (modoSilencioso) {
-      Serial.println("   ALARMA en modo silencioso. Se registra sin activar la salida.");
+      Serial.println("   ALARMA en modo silencioso. Se registra y se notifica sin activar la salida.");
+      strncpy(motivoAlarma, variable, sizeof(motivoAlarma) - 1); motivoAlarma[sizeof(motivoAlarma) - 1] = '\0';
+      strncpy(zonaAlarma, zona, sizeof(zonaAlarma) - 1);         zonaAlarma[sizeof(zonaAlarma) - 1] = '\0';
+      // Un solo intento. El evento ya queda registrado como medicion, y este
+      // aviso solo sirve para la notificacion.
+      enviarAlarma(true, true);
     } else {
       Serial.println("   ALARMA. Se activa la salida audible.");
       if (!sirenaPorAlarma) {
@@ -288,6 +298,8 @@ void procesarEvento(const char* variable, const char* zona,
         alarmaConfirmada = false;
         alarmaReportadaActiva = false;
       }
+      strncpy(motivoAlarma, variable, sizeof(motivoAlarma) - 1); motivoAlarma[sizeof(motivoAlarma) - 1] = '\0';
+      strncpy(zonaAlarma, zona, sizeof(zonaAlarma) - 1);         zonaAlarma[sizeof(zonaAlarma) - 1] = '\0';
       sirenaPorAlarma = true;
       tInicioSirena = millis();
     }
@@ -321,10 +333,11 @@ void procesarEvento(const char* variable, const char* zona,
 }
 
 /*
- * Avisa al backend que la alarma empezo o termino.
+ * Avisa al backend de una alarma. Con silenciosa = true el aviso es solo para
+ * que se notifique, porque no hay sirena que apagar despues.
  * Devuelve true si el backend respondio correctamente.
  */
-bool reportarAlarma(bool activa) {
+bool enviarAlarma(bool activa, bool silenciosa) {
   if (WiFi.status() != WL_CONNECTED) return false;
 
   HTTPClient http;
@@ -337,6 +350,11 @@ bool reportarAlarma(bool activa) {
   doc["vivienda_id"] = VIVIENDA_ID;
   doc["nodo_id"]     = NODO_ID;
   doc["activa"]      = activa;
+  if (activa) {
+    doc["motivo"]    = motivoAlarma;
+    doc["zona"]      = zonaAlarma;
+    doc["silenciosa"] = silenciosa;
+  }
   String cuerpo;
   serializeJson(doc, cuerpo);
 
@@ -345,10 +363,15 @@ bool reportarAlarma(bool activa) {
 
   Serial.print("[Alarma] Aviso al backend activa=");
   Serial.print(activa ? "true" : "false");
+  Serial.print(silenciosa ? " (silenciosa)" : "");
   Serial.print(" codigo=");
   Serial.println(codigo);
 
   return (codigo == 200);
+}
+
+bool reportarAlarma(bool activa) {
+  return enviarAlarma(activa, false);
 }
 
 /*

@@ -108,6 +108,17 @@
     50%      { box-shadow: 0 0 0 10px rgba(231, 76, 60, 0); }
   }
 
+  /* ---- Borrar historial (solo pruebas) ---- */
+  #zona-pruebas { display: none; margin-top: 18px; text-align: center; }
+  #zona-pruebas.visible { display: block; }
+  .boton-texto {
+    background: none; border: 1px dashed var(--borde); border-radius: 10px;
+    color: var(--texto-tenue); font-size: 13px; padding: 10px 14px;
+    cursor: pointer; font-family: inherit;
+  }
+  .boton-texto.confirmar { border-color: var(--rojo); color: var(--rojo); font-weight: 700; }
+  .nota-pruebas { font-size: 11px; color: #5A6B7C; margin-top: 6px; }
+
   /* ---- Sensores ---- */
   .sensores { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
   .sensor {
@@ -223,6 +234,14 @@
     <div class="interruptor" id="interruptor-silencio" onclick="alternarSilencio()"></div>
   </div>
 
+  <div class="fila-opcion">
+    <div>
+      <div class="titulo">Avisos en este dispositivo</div>
+      <div class="nota" id="nota-avisos">Vibración, sonido y notificación cuando suene la alarma</div>
+    </div>
+    <div class="interruptor" id="interruptor-avisos" onclick="alternarAvisos()"></div>
+  </div>
+
   <div class="sensores">
     <div class="sensor">
       <div class="nombre">Puerta</div>
@@ -247,6 +266,11 @@
   <h2>Historial <span id="conteo"></span></h2>
   <div id="lista"><div class="cargando">Consultando el servidor...</div></div>
 
+  <div id="zona-pruebas">
+    <button class="boton-texto" id="boton-limpiar" onclick="limpiarHistorial()">Borrar historial</button>
+    <div class="nota-pruebas">Solo disponible en modo de pruebas</div>
+  </div>
+
   <div class="pie">
     <span class="punto-vivo" id="punto-vivo"></span><span id="pie-texto">Conectando</span><br>
     Proyecto de Carrera · UABC FCQI
@@ -264,6 +288,7 @@ const TIEMPO_LIMITE_MS = 8000;
 
 let estado = { armado: false, modo_silencioso: false, actuador_activo: false, alarma_activa: false };
 let ocupado = false;
+let primeraCarga = true;   // evita alertar por una alarma que ya estaba activa al abrir la app
 let fallosSeguidos = 0;
 
 // ===================== Utilidades =====================
@@ -371,6 +396,9 @@ function pintarEstado() {
 
   const alarma = document.getElementById('tarjeta-alarma');
   alarma.classList.toggle('visible', !!estado.alarma_activa);
+  if (!estado.alarma_activa) restaurarTitulo();
+  document.getElementById('alarma-detalle').textContent =
+    (estado.alarma_motivo || 'Se detectó actividad') + ' con el sistema armado.';
 
   const sirena = document.getElementById('boton-sirena');
   sirena.textContent = estado.actuador_activo ? 'Apagar sirena' : 'Probar sirena';
@@ -451,7 +479,14 @@ async function refrescar(manual = false) {
       pedir('/mediciones?vivienda_id=' + encodeURIComponent(VIVIENDA) + '&limite=40')
     ]);
 
-    if (est) { estado = est; pintarEstado(); }
+    if (est) {
+      const antes = estado.alarma_activa;
+      estado = est;
+      pintarEstado();
+      // Se avisa solo en el momento en que la alarma pasa de apagada a activa
+      if (est.alarma_activa && !antes && primeraCarga === false) alertar(est.alarma_motivo);
+      primeraCarga = false;
+    }
     const lista = med && med.mediciones ? med.mediciones : [];
     pintarSensores(lista);
     pintarEventos(lista);
@@ -491,7 +526,137 @@ const alternarSilencio = () => cambiarEstado({ modo_silencioso: !estado.modo_sil
 const alternarSirena   = () => cambiarEstado({ actuador_activo: !estado.actuador_activo });
 const apagarAlarma     = () => cambiarEstado({ alarma_activa: false });
 
+// ===================== Avisos en el dispositivo =====================
+
+/*
+ * Avisos mientras la aplicacion esta abierta: vibracion, sonido y, si el
+ * navegador lo permite, una notificacion del sistema.
+ * Las notificaciones del sistema exigen una conexion segura (HTTPS o
+ * localhost). Con el servidor en HTTP no estan disponibles, y para eso existen
+ * las notificaciones push del servidor, que llegan aunque la app este cerrada.
+ */
+const TITULO_ORIGINAL = document.title;
+let avisosActivos = false;
+let contextoAudio = null;
+let parpadeoTitulo = null;
+
+function leerPreferencia() {
+  try { return localStorage.getItem('avisos') === '1'; } catch (e) { return false; }
+}
+function guardarPreferencia(v) {
+  try { localStorage.setItem('avisos', v ? '1' : '0'); } catch (e) { /* sin almacenamiento */ }
+}
+
+function pintarAvisos() {
+  document.getElementById('interruptor-avisos').className = 'interruptor' + (avisosActivos ? ' activo' : '');
+}
+
+async function alternarAvisos() {
+  avisosActivos = !avisosActivos;
+  guardarPreferencia(avisosActivos);
+  pintarAvisos();
+  if (!avisosActivos) return;
+
+  // El audio solo se puede iniciar tras un gesto del usuario, como este toque
+  try {
+    contextoAudio = contextoAudio || new (window.AudioContext || window.webkitAudioContext)();
+    if (contextoAudio.state === 'suspended') await contextoAudio.resume();
+    sonar(0.15);
+  } catch (e) { /* el navegador no soporta audio */ }
+
+  if (window.isSecureContext && 'Notification' in window && Notification.permission === 'default') {
+    try { await Notification.requestPermission(); } catch (e) { /* se ignora */ }
+  }
+  if (navigator.vibrate) navigator.vibrate(120);
+}
+
+function sonar(duracion) {
+  if (!contextoAudio) return;
+  const osc = contextoAudio.createOscillator();
+  const vol = contextoAudio.createGain();
+  osc.type = 'square';
+  osc.frequency.value = 880;
+  vol.gain.value = 0.15;
+  osc.connect(vol); vol.connect(contextoAudio.destination);
+  osc.start();
+  osc.stop(contextoAudio.currentTime + duracion);
+}
+
+function alertar(motivo) {
+  // El titulo parpadea aunque los avisos esten apagados, porque es discreto
+  // y ayuda a notar la pestana
+  if (!parpadeoTitulo) {
+    let alterno = false;
+    parpadeoTitulo = setInterval(() => {
+      document.title = alterno ? TITULO_ORIGINAL : '🚨 ALARMA ACTIVA';
+      alterno = !alterno;
+    }, 800);
+  }
+  if (!avisosActivos) return;
+
+  if (navigator.vibrate) navigator.vibrate([300, 150, 300, 150, 300]);
+  try { sonar(0.25); setTimeout(() => sonar(0.25), 400); setTimeout(() => sonar(0.25), 800); } catch (e) { /* sin audio */ }
+
+  if (window.isSecureContext && 'Notification' in window && Notification.permission === 'granted') {
+    try { new Notification('ALARMA ACTIVA', { body: (motivo || 'Se detectó actividad') + ' · ' + VIVIENDA, tag: 'alarma' }); } catch (e) { /* se ignora */ }
+  }
+}
+
+function restaurarTitulo() {
+  if (parpadeoTitulo) { clearInterval(parpadeoTitulo); parpadeoTitulo = null; }
+  document.title = TITULO_ORIGINAL;
+}
+
+// ===================== Configuración del servidor y modo de pruebas =====================
+
+let confirmandoBorrado = null;
+
+async function cargarConfiguracion() {
+  try {
+    const c = await pedir('/configuracion');
+    if (!c) return;
+    document.getElementById('zona-pruebas').classList.toggle('visible', !!c.modo_pruebas);
+    document.getElementById('nota-avisos').textContent = c.notificaciones_push
+      ? 'Vibración, sonido y notificación con la app abierta. Las notificaciones push del servidor están activas.'
+      : 'Vibración, sonido y notificación con la app abierta. Las notificaciones push del servidor están desactivadas.';
+  } catch (e) { /* se reintenta en el siguiente arranque */ }
+}
+
+// Dos toques para evitar borrar por accidente, sin usar cuadros de dialogo
+async function limpiarHistorial() {
+  const boton = document.getElementById('boton-limpiar');
+  if (!confirmandoBorrado) {
+    boton.textContent = 'Toca de nuevo para confirmar';
+    boton.classList.add('confirmar');
+    confirmandoBorrado = setTimeout(() => {
+      boton.textContent = 'Borrar historial';
+      boton.classList.remove('confirmar');
+      confirmandoBorrado = null;
+    }, 4000);
+    return;
+  }
+  clearTimeout(confirmandoBorrado);
+  confirmandoBorrado = null;
+  boton.classList.remove('confirmar');
+  boton.textContent = 'Borrando...';
+  try {
+    await pedir('/limpiar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vivienda_id: VIVIENDA, que: 'todo' })
+    });
+    await refrescar(true);
+  } catch (e) {
+    mostrarAviso(mensajeDeError(e));
+  } finally {
+    boton.textContent = 'Borrar historial';
+  }
+}
+
 // ===================== Arranque =====================
+avisosActivos = leerPreferencia();
+pintarAvisos();
+cargarConfiguracion();
 refrescar();
 setInterval(refrescar, INTERVALO_MS);
 

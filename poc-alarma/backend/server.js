@@ -21,6 +21,16 @@ const app = express();
 const PUERTO = process.env.PORT || 3000;
 const DEVICE_TOKEN = process.env.DEVICE_TOKEN || 'poc-token-demo';
 
+// Notificaciones push a traves de ntfy. Si NTFY_TOPIC esta vacio, el servicio
+// funciona igual pero no envia avisos. Quien conozca el nombre del tema puede
+// leer los avisos, por eso debe ser largo y dificil de adivinar.
+const NTFY_URL = (process.env.NTFY_URL || 'https://ntfy.sh').replace(/\/+$/, '');
+const NTFY_TOPIC = process.env.NTFY_TOPIC || '';
+
+// Habilita funciones que solo tienen sentido durante las pruebas, como borrar
+// el historial. Debe estar apagado cuando el sistema quede en uso real.
+const MODO_PRUEBAS = String(process.env.MODO_PRUEBAS || '').toLowerCase() === 'true';
+
 app.use(cors());
 app.use(express.json());
 
@@ -218,15 +228,49 @@ app.get('/mediciones/ultima', async (req, res) => {
  * ningun alta previa, lo que sostiene el requisito de escalabilidad por
  * configuracion: basta con que un nodo empiece a reportar con su identificador.
  */
+const COLUMNAS_ESTADO =
+  'vivienda_id, armado, modo_silencioso, actuador_activo, alarma_activa, alarma_motivo, actualizado_en';
+
 async function obtenerEstado(viviendaId) {
   const r = await pool.query(
     `INSERT INTO estado_vivienda (vivienda_id)
      VALUES ($1)
      ON CONFLICT (vivienda_id) DO UPDATE SET vivienda_id = EXCLUDED.vivienda_id
-     RETURNING vivienda_id, armado, modo_silencioso, actuador_activo, alarma_activa, actualizado_en`,
+     RETURNING ${COLUMNAS_ESTADO}`,
     [viviendaId]
   );
   return r.rows[0];
+}
+
+/*
+ * Traduce lo que reporta el nodo a un texto comprensible para el residente.
+ */
+function describirMotivo(variable, zona) {
+  const lugar = zona ? ` en ${zona}` : '';
+  if (variable === 'estado_puerta') return `Puerta abierta${lugar}`;
+  if (variable === 'movimiento') return `Movimiento detectado${lugar}`;
+  return `Actividad detectada${lugar}`;
+}
+
+/*
+ * Envia una notificacion push mediante ntfy.
+ * No se espera su resultado dentro de la peticion: si el servicio de avisos
+ * falla o tarda, la alarma no debe retrasarse ni fallar por eso.
+ * Se publica como JSON para que los acentos lleguen bien al telefono.
+ */
+function notificar(titulo, mensaje, prioridad = 5, etiquetas = ['rotating_light']) {
+  if (!NTFY_TOPIC) return;
+  fetch(NTFY_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ topic: NTFY_TOPIC, title: titulo, message: mensaje, priority: prioridad, tags: etiquetas }),
+    signal: AbortSignal.timeout(5000)
+  })
+    .then((r) => {
+      if (!r.ok) console.error(`Notificacion rechazada por ntfy (codigo ${r.status}).`);
+      else console.log('Notificacion enviada.');
+    })
+    .catch((e) => console.error('No se pudo enviar la notificacion:', e.message));
 }
 
 /*
@@ -299,9 +343,11 @@ app.post('/estado', async (req, res) => {
     const r = await pool.query(
       `UPDATE estado_vivienda
           SET armado = $2, modo_silencioso = $3, actuador_activo = $4,
-              alarma_activa = $5, actualizado_en = NOW()
+              alarma_activa = $5,
+              alarma_motivo = CASE WHEN $5 THEN alarma_motivo ELSE NULL END,
+              actualizado_en = NOW()
         WHERE vivienda_id = $1
-        RETURNING vivienda_id, armado, modo_silencioso, actuador_activo, alarma_activa, actualizado_en`,
+        RETURNING ${COLUMNAS_ESTADO}`,
       [vivienda_id, nuevoArmado, nuevoSilencio, nuevoActuador, nuevaAlarma]
     );
 
@@ -332,6 +378,13 @@ app.post('/estado', async (req, res) => {
  * Requiere el token del dispositivo, a diferencia de /estado, porque solo un
  * sensor debe poder declarar una alarma.
  *
+ * Campos: vivienda_id, activa, y opcionalmente nodo_id, motivo (variable que
+ * disparo, por ejemplo "estado_puerta"), zona y silenciosa.
+ *
+ * Con silenciosa = true el nodo dispara sin sirena por el modo silencioso: se
+ * registra y se notifica, pero no se marca alarma activa porque no hay nada
+ * que apagar.
+ *
  * Si el nodo avisa una alarma pero el sistema ya no esta armado (por ejemplo
  * el usuario lo desarmo justo en ese instante), no se marca la alarma. La
  * respuesta sigue siendo correcta para que el nodo no reintente sin fin.
@@ -341,7 +394,7 @@ app.post('/alarma', async (req, res) => {
     return res.status(401).json({ ok: false, mensaje: 'Token de dispositivo invalido o ausente.' });
   }
 
-  const { vivienda_id, activa, nodo_id } = req.body || {};
+  const { vivienda_id, activa, nodo_id, motivo, zona, silenciosa } = req.body || {};
   if (!vivienda_id) {
     return res.status(400).json({ ok: false, mensaje: 'Falta el campo obligatorio "vivienda_id".' });
   }
@@ -351,26 +404,87 @@ app.post('/alarma', async (req, res) => {
 
   try {
     const previo = await obtenerEstado(vivienda_id);
+    const texto = describirMotivo(motivo, zona);
 
     if (activa && !previo.armado) {
       return res.json({ ok: true, aplicada: false, mensaje: 'El sistema no esta armado. No se marco la alarma.', ...previo });
     }
 
+    if (activa && silenciosa === true) {
+      await registrarAccion(vivienda_id, 'alarma_silenciosa', false, true, nodo_id || 'dispositivo');
+      notificar('Alarma en modo silencioso', `${texto}. Vivienda ${vivienda_id}. La sirena no sono.`, 4, ['warning']);
+      return res.json({ ok: true, aplicada: false, mensaje: 'Alarma silenciosa registrada y notificada.', ...previo });
+    }
+
     const r = await pool.query(
-      `UPDATE estado_vivienda SET alarma_activa = $2, actualizado_en = NOW()
+      `UPDATE estado_vivienda
+          SET alarma_activa = $2,
+              alarma_motivo = CASE WHEN $2 THEN $3::text ELSE NULL END,
+              actualizado_en = NOW()
         WHERE vivienda_id = $1
-        RETURNING vivienda_id, armado, modo_silencioso, actuador_activo, alarma_activa, actualizado_en`,
-      [vivienda_id, activa]
+        RETURNING ${COLUMNAS_ESTADO}`,
+      [vivienda_id, activa, texto]
     );
 
     if (activa !== previo.alarma_activa) {
       await registrarAccion(vivienda_id, activa ? 'alarma_activada' : 'alarma_terminada',
                             previo.alarma_activa, activa, nodo_id || 'dispositivo');
+      if (activa) {
+        notificar('ALARMA ACTIVADA', `${texto}. Vivienda ${vivienda_id}.`, 5, ['rotating_light']);
+      }
     }
     return res.json({ ok: true, aplicada: true, ...r.rows[0] });
   } catch (e) {
     return res.status(500).json({ ok: false, mensaje: 'No se pudo actualizar la alarma.', detalle: e.message });
   }
+});
+
+/*
+ * POST /limpiar
+ * Borra el historial de una vivienda. Existe solo para la etapa de pruebas, y
+ * responde 403 salvo que el servidor tenga MODO_PRUEBAS=true. No borra el
+ * estado de armado ni la configuracion, unicamente los registros.
+ *
+ * Campo "que": "mediciones", "acciones" o "todo" (por omision).
+ */
+app.post('/limpiar', async (req, res) => {
+  if (!MODO_PRUEBAS) {
+    return res.status(403).json({
+      ok: false,
+      mensaje: 'La limpieza del historial esta deshabilitada. Solo se permite con MODO_PRUEBAS=true en el servidor.'
+    });
+  }
+
+  const { vivienda_id, que = 'todo' } = req.body || {};
+  if (!vivienda_id) {
+    return res.status(400).json({ ok: false, mensaje: 'Falta el campo obligatorio "vivienda_id".' });
+  }
+  if (!['mediciones', 'acciones', 'todo'].includes(que)) {
+    return res.status(400).json({ ok: false, mensaje: 'El campo "que" debe ser "mediciones", "acciones" o "todo".' });
+  }
+
+  try {
+    const borrado = { mediciones: 0, acciones: 0 };
+    if (que === 'mediciones' || que === 'todo') {
+      borrado.mediciones = (await pool.query('DELETE FROM mediciones WHERE vivienda_id = $1', [vivienda_id])).rowCount;
+    }
+    if (que === 'acciones' || que === 'todo') {
+      borrado.acciones = (await pool.query('DELETE FROM acciones WHERE vivienda_id = $1', [vivienda_id])).rowCount;
+    }
+    console.log(`Historial limpiado: ${vivienda_id} -> ${JSON.stringify(borrado)}`);
+    return res.json({ ok: true, mensaje: 'Historial borrado.', borrado });
+  } catch (e) {
+    return res.status(500).json({ ok: false, mensaje: 'No se pudo borrar el historial.', detalle: e.message });
+  }
+});
+
+/*
+ * GET /configuracion
+ * Informa a la aplicacion que funciones estan habilitadas en este servidor,
+ * para mostrar u ocultar controles como el de limpiar el historial.
+ */
+app.get('/configuracion', (_req, res) => {
+  res.json({ ok: true, modo_pruebas: MODO_PRUEBAS, notificaciones_push: Boolean(NTFY_TOPIC) });
 });
 
 /*

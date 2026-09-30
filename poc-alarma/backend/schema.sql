@@ -50,6 +50,11 @@ CREATE TABLE IF NOT EXISTS estado_vivienda (
 ALTER TABLE estado_vivienda
     ADD COLUMN IF NOT EXISTS alarma_activa BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- Texto que explica por que suena la alarma, por ejemplo "Puerta abierta en
+-- entrada". Se muestra en la aplicacion y se envia en la notificacion.
+ALTER TABLE estado_vivienda
+    ADD COLUMN IF NOT EXISTS alarma_motivo TEXT;
+
 -- ============================================================
 -- Bitacora de acciones del usuario (RNF-11, trazabilidad)
 -- ============================================================
