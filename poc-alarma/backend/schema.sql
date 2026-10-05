@@ -117,3 +117,149 @@ CREATE TABLE IF NOT EXISTS suscripciones_push (
     agente      TEXT,
     creado_en   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ============================================================
+-- Cuentas, sesiones y viviendas (inicio de sesion y multivivienda)
+-- ============================================================
+-- Hasta ahora vivienda_id era solo un texto que cualquiera podia consultar.
+-- Con estas tablas cada vivienda tiene duenos y miembros, y la aplicacion exige
+-- una sesion para ver o cambiar sus datos. Las demas tablas siguen usando
+-- vivienda_id como texto, por lo que los datos existentes se conservan.
+CREATE TABLE IF NOT EXISTS usuarios (
+    id            SERIAL PRIMARY KEY,
+    email         TEXT        NOT NULL,
+    nombre        TEXT        NOT NULL,
+    clave_hash    TEXT        NOT NULL,
+    creado_en     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ultimo_acceso TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS usuarios_email_idx ON usuarios (LOWER(email));
+
+-- Solo se guarda el resumen (SHA-256) del identificador de sesion. Si alguien
+-- obtuviera la base de datos no podria usar las sesiones activas.
+CREATE TABLE IF NOT EXISTS sesiones (
+    id_hash    TEXT        PRIMARY KEY,
+    usuario_id INTEGER     NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    creado_en  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expira_en  TIMESTAMPTZ NOT NULL,
+    agente     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sesiones_usuario ON sesiones (usuario_id);
+
+-- token_hash es el resumen del token que usan el concentrador y la camara de la
+-- vivienda. NULL significa que la vivienda aun usa el DEVICE_TOKEN global.
+CREATE TABLE IF NOT EXISTS viviendas (
+    id         TEXT        PRIMARY KEY,
+    nombre     TEXT        NOT NULL,
+    token_hash TEXT,
+    creado_en  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    creado_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS viviendas_token_idx ON viviendas (token_hash) WHERE token_hash IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS miembros (
+    vivienda_id TEXT    NOT NULL REFERENCES viviendas(id) ON DELETE CASCADE,
+    usuario_id  INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    rol         TEXT    NOT NULL DEFAULT 'miembro' CHECK (rol IN ('propietario', 'miembro')),
+    desde       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (vivienda_id, usuario_id)
+);
+
+-- Codigos de un solo uso para que otra persona se una a una vivienda, o cree su
+-- cuenta cuando el registro abierto esta desactivado.
+CREATE TABLE IF NOT EXISTS invitaciones (
+    codigo      TEXT        PRIMARY KEY,
+    vivienda_id TEXT        NOT NULL REFERENCES viviendas(id) ON DELETE CASCADE,
+    creado_por  INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    creado_en   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expira_en   TIMESTAMPTZ NOT NULL,
+    usado_por   INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    usado_en    TIMESTAMPTZ
+);
+
+-- ============================================================
+-- Nodos y registro automatico de sensores
+-- ============================================================
+-- El concentrador reporta cada pocos segundos los nodos que escucha. Asi la
+-- aplicacion sabe si un nodo sigue vivo (RF-25) y los sensores nuevos aparecen
+-- solos, sin esperar a que alguien abra la puerta.
+CREATE TABLE IF NOT EXISTS nodos (
+    vivienda_id  TEXT        NOT NULL,
+    nodo_id      TEXT        NOT NULL,
+    ultimo_visto TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    rssi         INTEGER,
+    en_linea     BOOLEAN     NOT NULL DEFAULT TRUE,
+    creado_en    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (vivienda_id, nodo_id)
+);
+
+-- Un sensor creado automaticamente queda "por confirmar" hasta que el
+-- residente le pone nombre y tipo. Sigue funcionando mientras tanto.
+ALTER TABLE sensores
+    ADD COLUMN IF NOT EXISTS confirmado BOOLEAN NOT NULL DEFAULT TRUE;
+
+-- ============================================================
+-- Camara (ESP32 con OV5640)
+-- ============================================================
+-- Las imagenes se guardan como archivos en disco, no en la base de datos, para
+-- no inflarla. Aqui solo queda el registro de cada una.
+CREATE TABLE IF NOT EXISTS camaras (
+    vivienda_id  TEXT        NOT NULL,
+    camara_id    TEXT        NOT NULL,
+    nombre       TEXT,
+    ultimo_visto TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    creado_en    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (vivienda_id, camara_id)
+);
+
+CREATE TABLE IF NOT EXISTS tareas_camara (
+    id           SERIAL PRIMARY KEY,
+    vivienda_id  TEXT        NOT NULL,
+    tipo         TEXT        NOT NULL CHECK (tipo IN ('foto', 'vivo')),
+    motivo       TEXT,
+    sensor_id    TEXT,
+    cantidad     INTEGER     NOT NULL DEFAULT 1,
+    tomadas      INTEGER     NOT NULL DEFAULT 0,
+    usuario      TEXT,
+    creado_en    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    iniciada_en  TIMESTAMPTZ,
+    terminada_en TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_tareas_camara_pend ON tareas_camara (vivienda_id, creado_en) WHERE terminada_en IS NULL;
+
+CREATE TABLE IF NOT EXISTS fotos (
+    id          SERIAL PRIMARY KEY,
+    vivienda_id TEXT        NOT NULL,
+    camara_id   TEXT,
+    tarea_id    INTEGER,
+    motivo      TEXT,
+    sensor_id   TEXT,
+    bytes       INTEGER     NOT NULL,
+    creado_en   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_fotos_vivienda_fecha ON fotos (vivienda_id, creado_en DESC);
+
+-- Sesiones de vista en vivo, para aplicar el tope de minutos por dia (RF-21).
+CREATE TABLE IF NOT EXISTS sesiones_vivo (
+    id          SERIAL PRIMARY KEY,
+    vivienda_id TEXT        NOT NULL,
+    usuario     TEXT,
+    inicio      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    fin         TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_sesiones_vivo_vivienda ON sesiones_vivo (vivienda_id, inicio DESC);
+
+-- Ultima vez que el concentrador de la vivienda consulto al servidor. Sirve para
+-- avisar al usuario si el concentrador deja de comunicarse (una alarma que no
+-- puede dispararse es peor que una que suena de mas).
+ALTER TABLE viviendas ADD COLUMN IF NOT EXISTS hub_visto TIMESTAMPTZ;
+ALTER TABLE viviendas ADD COLUMN IF NOT EXISTS hub_alerta BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Persona que activo las notificaciones en cada dispositivo. Si luego sale de la
+-- vivienda, deja de recibirlas.
+ALTER TABLE suscripciones_push ADD COLUMN IF NOT EXISTS usuario_id INTEGER;
+
+-- Un mismo telefono puede recibir avisos de varias viviendas: la unicidad pasa
+-- de "un endpoint" a "un endpoint por vivienda".
+ALTER TABLE suscripciones_push DROP CONSTRAINT IF EXISTS suscripciones_push_endpoint_key;
+CREATE UNIQUE INDEX IF NOT EXISTS suscripciones_push_viv_ep ON suscripciones_push (vivienda_id, endpoint);

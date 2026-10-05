@@ -17,10 +17,18 @@ const cors = require('cors');
 const path = require('path');
 const webpush = require('web-push');
 const { pool, inicializarEsquema } = require('./db');
+const auth = require('./auth');
+const camara = require('./camara');
+const { exigirMiembro, autenticarDispositivo, rechazarDispositivo, quien } = auth;
 
 const app = express();
 const PUERTO = process.env.PORT || 3000;
-const DEVICE_TOKEN = process.env.DEVICE_TOKEN || 'poc-token-demo';
+// Token global de la prueba de concepto. Solo lo aceptan las viviendas que
+// todavia no tienen token propio (ver auth.js). Si el firmware ya instalado usa
+// este valor, sigue funcionando hasta que se genere el token de la vivienda.
+if (!process.env.DEVICE_TOKEN) {
+  console.warn('Advertencia: DEVICE_TOKEN no esta definido. Los dispositivos solo podran usar el token de su vivienda.');
+}
 
 // Notificaciones push a traves de ntfy. Si NTFY_TOPIC esta vacio, el servicio
 // funciona igual pero no envia avisos. Quien conozca el nombre del tema puede
@@ -32,8 +40,25 @@ const NTFY_TOPIC = process.env.NTFY_TOPIC || '';
 // el historial. Debe estar apagado cuando el sistema quede en uso real.
 const MODO_PRUEBAS = String(process.env.MODO_PRUEBAS || '').toLowerCase() === 'true';
 
+// El servidor va detras del proxy inverso (Caddy), que indica si la conexion
+// original era HTTPS. Sin esto la cookie de sesion no se marcaria como Secure.
+app.set('trust proxy', 1);
+app.disable('x-powered-by');
+
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('Content-Security-Policy',
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; " +
+    "img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'self'");
+  next();
+});
+
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '100kb' }));
+app.use(auth.cargarSesion);
+app.use(auth.verificarOrigen);
 
 // Registro simple de peticiones, util durante las pruebas del taller
 app.use((req, _res, next) => {
@@ -105,13 +130,10 @@ app.get('/salud', async (_req, res) => {
  * porque el ESP32 no cuenta con reloj de tiempo real en esta etapa.
  */
 app.post('/mediciones', async (req, res) => {
-  const token = req.header('X-Device-Token');
-  if (token !== DEVICE_TOKEN) {
-    return res.status(401).json({
-      ok: false,
-      mensaje: 'Token de dispositivo invalido o ausente.'
-    });
-  }
+  const disp = await autenticarDispositivo(req).catch(() => null);
+  if (!disp) return rechazarDispositivo(res);
+  // La vivienda la fija el token, no lo que diga el cuerpo de la peticion
+  if (req.body && typeof req.body === 'object') req.body.vivienda_id = disp.viviendaId;
 
   const errores = validarMedicion(req.body);
   if (errores.length > 0) {
@@ -142,6 +164,7 @@ app.post('/mediciones', async (req, res) => {
     ]);
 
     await registrarSensorSiNuevo(vivienda_id, sensor_id, nodo_id, variable, zona);
+    await tocarNodo(vivienda_id, nodo_id, 0, null);
 
     return res.status(201).json({
       ok: true,
@@ -165,6 +188,7 @@ app.post('/mediciones', async (req, res) => {
 app.get('/mediciones', async (req, res) => {
   const limite = Math.min(Number(req.query.limite) || 50, 200);
   const viviendaId = req.query.vivienda_id;
+  if (!(await exigirMiembro(req, res, viviendaId))) return;
 
   try {
     let consulta = `
@@ -200,6 +224,7 @@ app.get('/mediciones', async (req, res) => {
  */
 app.get('/mediciones/ultima', async (req, res) => {
   const viviendaId = req.query.vivienda_id;
+  if (!(await exigirMiembro(req, res, viviendaId))) return;
   try {
     let consulta = `
       SELECT id, vivienda_id, zona, nodo_id, sensor_id, variable, valor, unidad,
@@ -242,22 +267,51 @@ function nombrePorOmision(tipo, zona) {
   return `${tipo === 'ventana' ? 'Ventana' : 'Puerta'}${lugar}`;
 }
 
+// Nombre provisional de un sensor detectado solo, hasta que el residente lo
+// renombre. Incluye el pin o la parte final del identificador para poder
+// distinguir varios contactos de un mismo nodo.
+function nombreAutomatico(tipo, sensorId, nodoId, zona) {
+  let cola = String(sensorId);
+  if (nodoId && cola.startsWith(nodoId + '-')) cola = cola.slice(nodoId.length + 1);
+  const base = tipo === 'movimiento' ? 'Movimiento' : 'Contacto';
+  return `${base} ${cola}`.slice(0, 60);
+}
+
 /*
  * Da de alta un sensor la primera vez que reporta. La migracion desde las
  * mediciones antiguas solo ocurre cuando la tabla esta vacia, para que un
  * sensor eliminado por el residente no reaparezca por su historial.
  */
-async function registrarSensorSiNuevo(viviendaId, sensorId, nodoId, variable, zona) {
+async function registrarSensorSiNuevo(viviendaId, sensorId, nodoId, variable, zona, confirmado = false) {
   const tipo = tipoPorVariable(variable);
   if (!tipo) return;
+  zona = limpiarTexto(zona, 40);
   await pool.query(
-    `INSERT INTO sensores (vivienda_id, sensor_id, nodo_id, tipo, nombre, zona)
-     SELECT $1::text, $2::text, $3::text, $4::text, $5::text, $6::text
+    `INSERT INTO sensores (vivienda_id, sensor_id, nodo_id, tipo, nombre, zona, confirmado)
+     SELECT $1::text, $2::text, $3::text, $4::text, $5::text, $6::text, $7::boolean
       WHERE NOT EXISTS (SELECT 1 FROM sensores WHERE vivienda_id = $1 AND sensor_id = $2)
         AND NOT EXISTS (SELECT 1 FROM acciones WHERE vivienda_id = $1 AND accion = 'sensor_eliminado'
                          AND valor_anterior = $2)
      ON CONFLICT (vivienda_id, sensor_id) DO NOTHING`,
-    [viviendaId, sensorId, nodoId, tipo, nombrePorOmision(tipo, zona), zona || null]
+    [viviendaId, sensorId, nodoId, tipo, confirmado ? nombrePorOmision(tipo, zona) : nombreAutomatico(tipo, sensorId, nodoId, zona), zona || null, confirmado]
+  );
+}
+
+/*
+ * Anota que un nodo sigue vivo. hace_s permite que el concentrador indique
+ * cuanto tiempo atras escucho al nodo, porque reporta por lotes.
+ */
+async function tocarNodo(viviendaId, nodoId, haceS, rssi) {
+  const id = limpiarTexto(nodoId, 40);
+  if (!id) return;
+  await pool.query(
+    `INSERT INTO nodos (vivienda_id, nodo_id, ultimo_visto, rssi, en_linea)
+     VALUES ($1, $2, NOW() - ($3 || ' seconds')::interval, $4, TRUE)
+     ON CONFLICT (vivienda_id, nodo_id) DO UPDATE
+       SET ultimo_visto = GREATEST(nodos.ultimo_visto, EXCLUDED.ultimo_visto),
+           rssi = COALESCE(EXCLUDED.rssi, nodos.rssi),
+           en_linea = TRUE`,
+    [viviendaId, id, String(Math.max(0, Math.min(Number(haceS) || 0, 3600))), Number.isFinite(rssi) ? rssi : null]
   );
 }
 
@@ -271,13 +325,14 @@ async function migrarSensoresAntiguos() {
       ORDER BY vivienda_id, sensor_id, creado_en DESC`
   );
   for (const f of r.rows) {
-    await registrarSensorSiNuevo(f.vivienda_id, f.sensor_id, f.nodo_id, f.variable, f.zona);
+    // Los sensores que ya tenian historial se consideran confirmados
+    await registrarSensorSiNuevo(f.vivienda_id, f.sensor_id, f.nodo_id, f.variable, f.zona, true);
   }
   if (r.rowCount) console.log(`Sensores migrados desde el historial: ${r.rowCount}`);
 }
 
 const CONSULTA_SENSORES = `
-  SELECT s.id, s.vivienda_id, s.sensor_id, s.nodo_id, s.tipo, s.nombre, s.zona, s.creado_en,
+  SELECT s.id, s.vivienda_id, s.sensor_id, s.nodo_id, s.tipo, s.nombre, s.zona, s.creado_en, s.confirmado,
          u.valor AS ultimo_valor, u.creado_en AS ultima_lectura, u.variable,
          d.creado_en AS ultima_deteccion
     FROM sensores s
@@ -298,21 +353,20 @@ async function listarSensores(viviendaId, sensorDbId) {
   return r.rows;
 }
 
-function limpiarTexto(v, max) {
-  if (v === undefined || v === null) return null;
-  const t = String(v).trim().slice(0, max);
-  return t === '' ? null : t;
-}
+const limpiarTexto = auth.limpiarTexto;
 
 /*
  * GET /sensores
  * Lista los sensores de la vivienda con su ultimo valor y ultima deteccion.
  */
 app.get('/sensores', async (req, res) => {
-  const viviendaId = req.query.vivienda_id || 'casa-001';
+  const viviendaId = req.query.vivienda_id;
+  if (!(await exigirMiembro(req, res, viviendaId))) return;
   try {
     const sensores = await listarSensores(viviendaId);
-    return res.json({ ok: true, total: sensores.length, sensores });
+    const nodos = await pool.query(
+      'SELECT nodo_id, ultimo_visto, rssi, en_linea FROM nodos WHERE vivienda_id = $1 ORDER BY nodo_id', [viviendaId]);
+    return res.json({ ok: true, total: sensores.length, sensores, nodos: nodos.rows });
   } catch (e) {
     return res.status(500).json({ ok: false, mensaje: 'No se pudieron consultar los sensores.', detalle: e.message });
   }
@@ -320,12 +374,13 @@ app.get('/sensores', async (req, res) => {
 
 // Alta manual, por si el residente quiere nombrar un sensor antes de que reporte.
 app.post('/sensores', async (req, res) => {
-  const { vivienda_id, sensor_id, tipo, nombre, zona, usuario } = req.body || {};
+  const { vivienda_id, sensor_id, tipo, nombre, zona } = req.body || {};
   const errores = [];
   if (!vivienda_id) errores.push('Falta el campo obligatorio "vivienda_id".');
   if (!limpiarTexto(sensor_id, 60)) errores.push('Falta el campo obligatorio "sensor_id".');
   if (!TIPOS_SENSOR.includes(tipo)) errores.push('El campo "tipo" debe ser "puerta", "ventana" o "movimiento".');
   if (errores.length) return res.status(400).json({ ok: false, mensaje: 'La solicitud es incorrecta.', errores });
+  if (!(await exigirMiembro(req, res, vivienda_id))) return;
 
   const nombreFinal = limpiarTexto(nombre, 60) || nombrePorOmision(tipo, limpiarTexto(zona, 40));
   try {
@@ -339,7 +394,7 @@ app.post('/sensores', async (req, res) => {
     if (r.rowCount === 0) {
       return res.status(409).json({ ok: false, mensaje: 'Ya existe un sensor con ese identificador.' });
     }
-    await registrarAccion(vivienda_id, 'sensor_agregado', '', nombreFinal, usuario);
+    await registrarAccion(vivienda_id, 'sensor_agregado', '', nombreFinal, quien(req));
     const [sensor] = await listarSensores(vivienda_id, r.rows[0].id);
     return res.status(201).json({ ok: true, sensor });
   } catch (e) {
@@ -350,7 +405,7 @@ app.post('/sensores', async (req, res) => {
 app.patch('/sensores/:id', async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ ok: false, mensaje: 'Identificador invalido.' });
-  const { tipo, nombre, zona, usuario } = req.body || {};
+  const { tipo, nombre, zona } = req.body || {};
   if (tipo !== undefined && !TIPOS_SENSOR.includes(tipo)) {
     return res.status(400).json({ ok: false, mensaje: 'El campo "tipo" debe ser "puerta", "ventana" o "movimiento".' });
   }
@@ -358,6 +413,7 @@ app.patch('/sensores/:id', async (req, res) => {
     const a = await pool.query('SELECT * FROM sensores WHERE id = $1', [id]);
     if (a.rowCount === 0) return res.status(404).json({ ok: false, mensaje: 'Sensor no encontrado.' });
     const previo = a.rows[0];
+    if (!(await exigirMiembro(req, res, previo.vivienda_id))) return;
 
     // Un contacto solo puede ser puerta o ventana, y un PIR solo movimiento.
     if (tipo !== undefined && tipo !== previo.tipo) {
@@ -379,9 +435,10 @@ app.patch('/sensores/:id', async (req, res) => {
     const nuevoNombre = nombre !== undefined ? (limpiarTexto(nombre, 60) || previo.nombre) : previo.nombre;
     const nuevaZona = zona !== undefined ? limpiarTexto(zona, 40) : previo.zona;
     const nuevoTipo = tipo !== undefined ? tipo : previo.tipo;
-    await pool.query('UPDATE sensores SET nombre = $2, zona = $3, tipo = $4 WHERE id = $1',
+    // Editarlo equivale a confirmarlo
+    await pool.query('UPDATE sensores SET nombre = $2, zona = $3, tipo = $4, confirmado = TRUE WHERE id = $1',
                      [id, nuevoNombre, nuevaZona, nuevoTipo]);
-    await registrarAccion(previo.vivienda_id, 'sensor_editado', previo.nombre, nuevoNombre, usuario);
+    await registrarAccion(previo.vivienda_id, 'sensor_editado', previo.nombre, nuevoNombre, quien(req));
     const [sensor] = await listarSensores(previo.vivienda_id, id);
     return res.json({ ok: true, sensor });
   } catch (e) {
@@ -393,12 +450,15 @@ app.delete('/sensores/:id', async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ ok: false, mensaje: 'Identificador invalido.' });
   try {
+    const previo = await pool.query('SELECT vivienda_id FROM sensores WHERE id = $1', [id]);
+    if (previo.rowCount === 0) return res.status(404).json({ ok: false, mensaje: 'Sensor no encontrado.' });
+    if (!(await exigirMiembro(req, res, previo.rows[0].vivienda_id))) return;
     const r = await pool.query('DELETE FROM sensores WHERE id = $1 RETURNING vivienda_id, sensor_id, nombre', [id]);
     if (r.rowCount === 0) return res.status(404).json({ ok: false, mensaje: 'Sensor no encontrado.' });
     const f = r.rows[0];
     // valor_anterior guarda el identificador para que el sensor no se vuelva a
     // registrar solo si el nodo sigue reportandolo. Solo un alta manual lo revive.
-    await registrarAccion(f.vivienda_id, 'sensor_eliminado', f.sensor_id, f.nombre, req.body && req.body.usuario);
+    await registrarAccion(f.vivienda_id, 'sensor_eliminado', f.sensor_id, f.nombre, quien(req));
     return res.json({ ok: true, mensaje: 'Sensor eliminado.' });
   } catch (e) {
     return res.status(500).json({ ok: false, mensaje: 'No se pudo eliminar el sensor.', detalle: e.message });
@@ -506,11 +566,21 @@ async function enviarPush(sub, carga) {
 
 async function notificarPush(viviendaId, titulo, mensaje, etiqueta) {
   if (!pushListo) return;
-  const r = await pool.query('SELECT endpoint, p256dh, auth FROM suscripciones_push WHERE vivienda_id = $1', [viviendaId]);
+  // Solo reciben el aviso quienes siguen siendo miembros (o dispositivos
+  // suscritos antes de que existieran las cuentas)
+  const r = await pool.query(
+    `SELECT endpoint, p256dh, auth FROM suscripciones_push
+      WHERE vivienda_id = $1
+        AND (usuario_id IS NULL OR usuario_id IN (SELECT usuario_id FROM miembros WHERE vivienda_id = $1))`, [viviendaId]);
   if (r.rows.length === 0) return;
+  const v = await pool.query('SELECT nombre FROM viviendas WHERE id = $1', [viviendaId]);
+  if (v.rowCount) mensaje = `${mensaje} (${v.rows[0].nombre})`;
   const carga = { titulo, cuerpo: mensaje, etiqueta: etiqueta || 'alarma', url: '/' };
+  const t0 = Date.now();
   const resultados = await Promise.all(r.rows.map((s) => enviarPush(s, carga)));
-  console.log(`Push enviado a ${resultados.filter(Boolean).length} de ${r.rows.length} dispositivo(s).`);
+  // El tiempo que tarda el servicio de Apple o Google en aceptar el aviso ayuda
+  // a saber si un retraso esta en este servidor o en la entrega al telefono.
+  console.log(`Push enviado a ${resultados.filter(Boolean).length} de ${r.rows.length} dispositivo(s) en ${Date.now() - t0} ms.`);
 }
 
 /*
@@ -534,6 +604,98 @@ function notificar(viviendaId, titulo, mensaje, prioridad = 5, etiquetas = ['rot
     .catch((e) => console.error('No se pudo enviar la notificacion ntfy:', e.message));
 }
 
+// ===================== Concentrador y nodos =====================
+
+const UMBRAL_CONCENTRADOR_MS = 90000;   // sin consultas durante este tiempo se considera desconectado
+const UMBRAL_NODO_S = 120;              // el nodo emite latido cada 30 s; 4 perdidos se consideran sin senal
+const ultimoRegistroConcentrador = new Map();
+
+/*
+ * El concentrador consulta /estado cada 2 s. Para no escribir en la base de
+ * datos con cada consulta, se anota como maximo una vez cada 20 s.
+ */
+function marcarConcentrador(viviendaId) {
+  const ahora = Date.now();
+  if (ahora - (ultimoRegistroConcentrador.get(viviendaId) || 0) < 20000) return;
+  ultimoRegistroConcentrador.set(viviendaId, ahora);
+  pool.query('UPDATE viviendas SET hub_visto = NOW(), hub_alerta = FALSE WHERE id = $1', [viviendaId])
+    .catch((e) => console.error('No se pudo anotar al concentrador:', e.message));
+}
+
+/*
+ * POST /nodos/latido
+ * El concentrador reporta por lotes los nodos que escucha y los sensores que
+ * cada uno declara. Con esto:
+ *   - los sensores nuevos aparecen en la aplicacion sin que nadie los active
+ *   - la aplicacion sabe si un nodo sigue vivo (RF-25)
+ * No inserta mediciones, para no llenar el historial con lecturas repetidas.
+ */
+app.post('/nodos/latido', async (req, res) => {
+  const disp = await autenticarDispositivo(req).catch(() => null);
+  if (!disp) return rechazarDispositivo(res);
+  const viviendaId = disp.viviendaId;
+  const nodos = Array.isArray(req.body && req.body.nodos) ? req.body.nodos.slice(0, 16) : null;
+  if (!nodos) return res.status(400).json({ ok: false, mensaje: 'El campo "nodos" debe ser una lista.' });
+
+  try {
+    marcarConcentrador(viviendaId);
+    let sensoresNuevos = 0;
+    for (const n of nodos) {
+      const nodoId = limpiarTexto(n && n.nodo_id, 40);
+      if (!nodoId) continue;
+      await tocarNodo(viviendaId, nodoId, n.hace_s, Number(n.rssi));
+      const lista = Array.isArray(n.sensores) ? n.sensores.slice(0, 16) : [];
+      for (const sen of lista) {
+        const sensorId = limpiarTexto(sen && sen.sensor_id, 60);
+        if (!sensorId) continue;
+        const antes = await pool.query('SELECT 1 FROM sensores WHERE vivienda_id = $1 AND sensor_id = $2', [viviendaId, sensorId]);
+        await registrarSensorSiNuevo(viviendaId, sensorId, nodoId, sen.variable, sen.zona);
+        if (!antes.rowCount) {
+          const ahora = await pool.query('SELECT 1 FROM sensores WHERE vivienda_id = $1 AND sensor_id = $2', [viviendaId, sensorId]);
+          if (ahora.rowCount) sensoresNuevos++;
+        }
+      }
+    }
+    if (sensoresNuevos) console.log(`Sensores nuevos detectados en ${viviendaId}: ${sensoresNuevos}`);
+    return res.json({ ok: true, sensores_nuevos: sensoresNuevos });
+  } catch (e) {
+    return res.status(500).json({ ok: false, mensaje: 'No se pudo registrar el latido.', detalle: e.message });
+  }
+});
+
+/*
+ * Revisa cada 30 s si algun concentrador o nodo dejo de comunicarse y avisa una
+ * sola vez por cada interrupcion. Un nodo solo se da por perdido si el
+ * concentrador sigue conectado; si el concentrador cayo, el silencio de los
+ * nodos es consecuencia y no se avisa por separado.
+ */
+async function vigilarDispositivos() {
+  try {
+    const hubs = await pool.query(
+      `UPDATE viviendas SET hub_alerta = TRUE
+        WHERE hub_visto IS NOT NULL AND NOT hub_alerta
+          AND hub_visto < NOW() - ($1 || ' milliseconds')::interval
+        RETURNING id`, [String(UMBRAL_CONCENTRADOR_MS + 30000)]);
+    for (const f of hubs.rows) {
+      console.log(`Concentrador sin comunicacion: ${f.id}`);
+      notificar(f.id, 'Concentrador sin conexión', 'El concentrador dejó de comunicarse con el servidor. Mientras tanto la alarma no puede avisar.', 4, ['warning']);
+    }
+    const nodos = await pool.query(
+      `UPDATE nodos n SET en_linea = FALSE
+        FROM viviendas v
+        WHERE v.id = n.vivienda_id AND n.en_linea
+          AND n.ultimo_visto < NOW() - ($1 || ' seconds')::interval
+          AND v.hub_visto > NOW() - ($2 || ' milliseconds')::interval
+        RETURNING n.vivienda_id, n.nodo_id`, [String(UMBRAL_NODO_S), String(UMBRAL_CONCENTRADOR_MS)]);
+    for (const f of nodos.rows) {
+      console.log(`Nodo sin senal: ${f.vivienda_id}/${f.nodo_id}`);
+      notificar(f.vivienda_id, 'Un nodo dejó de responder', `El nodo ${f.nodo_id} no se reporta desde hace más de 2 minutos. Revisa su alimentación.`, 4, ['warning']);
+    }
+  } catch (e) {
+    console.error('Error al vigilar dispositivos:', e.message);
+  }
+}
+
 /*
  * Registra una accion del usuario sobre el sistema.
  * Responde al requisito de trazabilidad: permite saber quien cambio que y cuando.
@@ -552,10 +714,25 @@ async function registrarAccion(viviendaId, accion, anterior, nuevo, usuario) {
  * El concentrador lo usa para decidir si un evento debe disparar la sirena.
  */
 app.get('/estado', async (req, res) => {
-  const viviendaId = req.query.vivienda_id || 'casa-001';
   try {
+    // El concentrador consulta con su token; la aplicacion, con su sesion
+    if (req.header('X-Device-Token')) {
+      const disp = await autenticarDispositivo(req).catch(() => null);
+      if (!disp) return rechazarDispositivo(res);
+      marcarConcentrador(disp.viviendaId);
+      const estado = await obtenerEstado(disp.viviendaId);
+      return res.json({ ok: true, ...estado });
+    }
+    const viviendaId = req.query.vivienda_id;
+    if (!(await exigirMiembro(req, res, viviendaId))) return;
     const estado = await obtenerEstado(viviendaId);
-    return res.json({ ok: true, ...estado });
+    const h = await pool.query('SELECT hub_visto FROM viviendas WHERE id = $1', [viviendaId]);
+    const visto = h.rowCount ? h.rows[0].hub_visto : null;
+    return res.json({
+      ok: true, ...estado,
+      hub_visto: visto,
+      hub_en_linea: Boolean(visto) && Date.now() - new Date(visto).getTime() < UMBRAL_CONCENTRADOR_MS
+    });
   } catch (e) {
     return res.status(500).json({ ok: false, mensaje: 'No se pudo consultar el estado.', detalle: e.message });
   }
@@ -568,11 +745,13 @@ app.get('/estado', async (req, res) => {
  * Se aceptan cambios parciales: lo que no venga en la peticion no se modifica.
  */
 app.post('/estado', async (req, res) => {
-  const { vivienda_id, armado, modo_silencioso, actuador_activo, alarma_activa, usuario } = req.body || {};
+  const { vivienda_id, armado, modo_silencioso, actuador_activo, alarma_activa } = req.body || {};
+  const usuario = quien(req);
 
   if (!vivienda_id) {
     return res.status(400).json({ ok: false, mensaje: 'Falta el campo obligatorio "vivienda_id".' });
   }
+  if (!(await exigirMiembro(req, res, vivienda_id))) return;
 
   const campos = { armado, modo_silencioso, actuador_activo, alarma_activa };
   const errores = [];
@@ -652,14 +831,11 @@ app.post('/estado', async (req, res) => {
  * respuesta sigue siendo correcta para que el nodo no reintente sin fin.
  */
 app.post('/alarma', async (req, res) => {
-  if (req.header('X-Device-Token') !== DEVICE_TOKEN) {
-    return res.status(401).json({ ok: false, mensaje: 'Token de dispositivo invalido o ausente.' });
-  }
+  const disp = await autenticarDispositivo(req).catch(() => null);
+  if (!disp) return rechazarDispositivo(res);
+  const vivienda_id = disp.viviendaId;
 
-  const { vivienda_id, activa, nodo_id, motivo, zona, silenciosa, sensor_id } = req.body || {};
-  if (!vivienda_id) {
-    return res.status(400).json({ ok: false, mensaje: 'Falta el campo obligatorio "vivienda_id".' });
-  }
+  const { activa, nodo_id, motivo, zona, silenciosa, sensor_id } = req.body || {};
   if (typeof activa !== 'boolean') {
     return res.status(400).json({ ok: false, mensaje: 'El campo "activa" debe ser true o false.' });
   }
@@ -682,7 +858,8 @@ app.post('/alarma', async (req, res) => {
 
     if (activa && silenciosa === true) {
       await registrarAccion(vivienda_id, 'alarma_silenciosa', false, true, nodo_id || 'dispositivo');
-      notificar(vivienda_id, 'Alarma en modo silencioso', `${texto}. Vivienda ${vivienda_id}. La sirena no sono.`, 4, ['warning']);
+      notificar(vivienda_id, 'Alarma en modo silencioso', `${texto}. La sirena no sono.`, 4, ['warning']);
+      camara.solicitarFotoAlarma(vivienda_id, texto, sensor_id);
       return res.json({ ok: true, aplicada: false, mensaje: 'Alarma silenciosa registrada y notificada.', ...previo });
     }
 
@@ -701,7 +878,8 @@ app.post('/alarma', async (req, res) => {
       await registrarAccion(vivienda_id, activa ? 'alarma_activada' : 'alarma_terminada',
                             previo.alarma_activa, activa, nodo_id || 'dispositivo');
       if (activa) {
-        notificar(vivienda_id, 'ALARMA ACTIVADA', `${texto}. Vivienda ${vivienda_id}.`, 5, ['rotating_light']);
+        notificar(vivienda_id, 'ALARMA ACTIVADA', `${texto}.`, 5, ['rotating_light']);
+        camara.solicitarFotoAlarma(vivienda_id, texto, sensor_id);
       }
     }
     return res.json({ ok: true, aplicada: true, ...r.rows[0] });
@@ -727,9 +905,7 @@ app.post('/limpiar', async (req, res) => {
   }
 
   const { vivienda_id, que = 'todo' } = req.body || {};
-  if (!vivienda_id) {
-    return res.status(400).json({ ok: false, mensaje: 'Falta el campo obligatorio "vivienda_id".' });
-  }
+  if (!(await exigirMiembro(req, res, vivienda_id, 'propietario'))) return;
   if (!['mediciones', 'acciones', 'todo'].includes(que)) {
     return res.status(400).json({ ok: false, mensaje: 'El campo "que" debe ser "mediciones", "acciones" o "todo".' });
   }
@@ -763,8 +939,9 @@ app.get('/configuracion', (_req, res) => {
  * Bitacora de acciones del usuario, para la pantalla de historial.
  */
 app.get('/acciones', async (req, res) => {
-  const viviendaId = req.query.vivienda_id || 'casa-001';
+  const viviendaId = req.query.vivienda_id;
   const limite = Math.min(Number(req.query.limite) || 30, 200);
+  if (!(await exigirMiembro(req, res, viviendaId))) return;
   try {
     const r = await pool.query(
       `SELECT id, vivienda_id, accion, valor_anterior, valor_nuevo, usuario, creado_en
@@ -788,8 +965,16 @@ app.get('/acciones', async (req, res) => {
  * de modo que no existan dos fuentes de verdad.
  */
 app.get('/comando', async (req, res) => {
-  const viviendaId = req.query.vivienda_id || 'casa-001';
   try {
+    let viviendaId;
+    if (req.header('X-Device-Token')) {
+      const disp = await autenticarDispositivo(req).catch(() => null);
+      if (!disp) return rechazarDispositivo(res);
+      viviendaId = disp.viviendaId;
+    } else {
+      viviendaId = req.query.vivienda_id;
+      if (!(await exigirMiembro(req, res, viviendaId))) return;
+    }
     const estado = await obtenerEstado(viviendaId);
     return res.json({
       ok: true,
@@ -809,6 +994,7 @@ app.post('/comando', async (req, res) => {
   if (typeof actuador_activo !== 'boolean') {
     return res.status(400).json({ ok: false, mensaje: 'El campo "actuador_activo" debe ser true o false.' });
   }
+  if (!(await exigirMiembro(req, res, vivienda_id))) return;
   try {
     const previo = await obtenerEstado(vivienda_id);
     await pool.query(
@@ -816,7 +1002,7 @@ app.post('/comando', async (req, res) => {
       [vivienda_id, actuador_activo]
     );
     if (actuador_activo !== previo.actuador_activo) {
-      await registrarAccion(vivienda_id, 'salida_audible', previo.actuador_activo, actuador_activo, 'residente');
+      await registrarAccion(vivienda_id, 'salida_audible', previo.actuador_activo, actuador_activo, quien(req));
     }
     return res.json({
       ok: true,
@@ -851,15 +1037,16 @@ app.post('/push/suscribir', async (req, res) => {
   if (!vivienda_id || !suscripcionValida(suscripcion)) {
     return res.status(400).json({ ok: false, mensaje: 'Suscripcion invalida.' });
   }
+  if (!(await exigirMiembro(req, res, vivienda_id))) return;
   try {
     await pool.query(
-      `INSERT INTO suscripciones_push (vivienda_id, endpoint, p256dh, auth, agente)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (endpoint) DO UPDATE
-         SET vivienda_id = EXCLUDED.vivienda_id, p256dh = EXCLUDED.p256dh,
-             auth = EXCLUDED.auth, agente = EXCLUDED.agente`,
+      `INSERT INTO suscripciones_push (vivienda_id, endpoint, p256dh, auth, agente, usuario_id)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (vivienda_id, endpoint) DO UPDATE
+         SET p256dh = EXCLUDED.p256dh,
+             auth = EXCLUDED.auth, agente = EXCLUDED.agente, usuario_id = EXCLUDED.usuario_id`,
       [vivienda_id, suscripcion.endpoint, suscripcion.keys.p256dh, suscripcion.keys.auth,
-       String(req.get('user-agent') || '').slice(0, 200)]
+       String(req.get('user-agent') || '').slice(0, 200), req.usuario.id]
     );
     res.json({ ok: true });
   } catch (e) {
@@ -867,7 +1054,7 @@ app.post('/push/suscribir', async (req, res) => {
   }
 });
 
-app.post('/push/cancelar', async (req, res) => {
+app.post('/push/cancelar', auth.requiereSesion, async (req, res) => {
   const { endpoint } = req.body || {};
   if (typeof endpoint !== 'string') return res.status(400).json({ ok: false, mensaje: 'Falta el endpoint.' });
   try {
@@ -878,7 +1065,7 @@ app.post('/push/cancelar', async (req, res) => {
   }
 });
 
-app.post('/push/prueba', async (req, res) => {
+app.post('/push/prueba', auth.requiereSesion, async (req, res) => {
   const { endpoint } = req.body || {};
   if (!pushListo) return res.status(503).json({ ok: false, mensaje: 'Las notificaciones push no estan disponibles.' });
   try {
@@ -890,6 +1077,20 @@ app.post('/push/prueba', async (req, res) => {
     res.status(500).json({ ok: false, mensaje: 'No se pudo enviar la prueba.', detalle: e.message });
   }
 });
+
+// ===================== Cuentas, viviendas y camara =====================
+
+auth.montarRutas(app, {
+  registrarAccion,
+  borrarDatosVivienda: async (id) => {
+    await camara.borrarFotosVivienda(id);
+    for (const t of ['mediciones', 'acciones', 'sensores', 'nodos', 'estado_vivienda', 'suscripciones_push',
+                     'camaras', 'tareas_camara', 'fotos', 'sesiones_vivo']) {
+      await pool.query(`DELETE FROM ${t} WHERE vivienda_id = $1`, [id]);
+    }
+  }
+});
+camara.montarRutas(app, { notificar, registrarAccion });
 
 // ===================== Frontend =====================
 
@@ -913,10 +1114,29 @@ app.use((req, res) => {
   res.status(404).json({ ok: false, mensaje: `Ruta no encontrada: ${req.method} ${req.originalUrl}` });
 });
 
+/*
+ * Las viviendas que ya existian como simple texto (por ejemplo "casa-001") se
+ * dan de alta en la tabla viviendas. Quedan sin duenos hasta que se registre la
+ * primera cuenta, que las hereda.
+ */
+async function migrarViviendas() {
+  const r = await pool.query(
+    `INSERT INTO viviendas (id, nombre)
+     SELECT DISTINCT vivienda_id, INITCAP(REPLACE(vivienda_id, '-', ' ')) FROM (
+       SELECT vivienda_id FROM estado_vivienda UNION SELECT vivienda_id FROM mediciones
+       UNION SELECT vivienda_id FROM sensores UNION SELECT vivienda_id FROM acciones
+       UNION SELECT vivienda_id FROM suscripciones_push) t
+     ON CONFLICT (id) DO NOTHING`);
+  if (r.rowCount) console.log(`Viviendas migradas desde los datos existentes: ${r.rowCount}`);
+}
+
 inicializarEsquema()
+  .then(migrarViviendas)
   .then(migrarSensoresAntiguos)
   .then(iniciarPush)
+  .then(() => camara.iniciar())
   .then(() => {
+    setInterval(vigilarDispositivos, 30000).unref();
     app.listen(PUERTO, () => {
       console.log(`Backend escuchando en el puerto ${PUERTO}`);
     });

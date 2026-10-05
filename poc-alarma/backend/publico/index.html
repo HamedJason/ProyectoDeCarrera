@@ -341,14 +341,15 @@
   @keyframes sale { 0% { opacity: .9; transform: translateX(0) scale(.6); } 100% { opacity: 0; transform: translateX(calc(var(--dir) * 20px)) scale(1.35); } }
 
   /* ---- Dialogo de edicion ---- */
-  dialog#dialogo { width: min(420px, calc(100vw - 28px)); padding: 0; border: 1px solid var(--linea); border-radius: 22px; background: var(--papel); color: var(--tinta); box-shadow: 0 24px 60px rgba(21, 48, 43, .28); }
-  dialog#dialogo::backdrop { background: rgba(21, 48, 43, .45); }
-  #dialogo form { padding: 22px 20px 18px; display: grid; gap: 14px; }
-  #dialogo h3 { margin: 0; font-size: 22px; font-weight: 800; font-stretch: 90%; letter-spacing: -0.02em; }
-  #dialogo label, #dialogo legend { display: block; font-size: 13px; font-weight: 600; color: var(--tinta-2); margin-bottom: 5px; padding: 0; }
-  #dialogo fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
-  #dialogo input[type=text] { width: 100%; font: inherit; font-size: 16px; padding: 11px 12px; background: #fff; color: var(--tinta); border: 1.5px solid var(--linea); border-radius: 10px; }
-  #dialogo input[type=text]:focus { outline: 3px solid var(--pino-claro); border-color: var(--pino); }
+  dialog.hoja { width: min(440px, calc(100vw - 28px)); max-height: calc(100vh - 32px); padding: 0; border: 1px solid var(--linea); border-radius: 22px; background: var(--papel); color: var(--tinta); box-shadow: 0 24px 60px rgba(21, 48, 43, .28); }
+  dialog.hoja::backdrop { background: rgba(21, 48, 43, .45); }
+  .hoja form, .hoja .hoja-cuerpo { padding: 22px 20px 18px; display: grid; gap: 14px; }
+  .hoja h3 { margin: 0; font-size: 22px; font-weight: 800; font-stretch: 90%; letter-spacing: -0.02em; }
+  .hoja h4 { margin: 4px 0 0; font-size: 15px; font-weight: 800; letter-spacing: -0.01em; }
+  .hoja label, .hoja legend { display: block; font-size: 13px; font-weight: 600; color: var(--tinta-2); margin-bottom: 5px; padding: 0; }
+  .hoja fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+  .hoja input[type=text], .hoja input[type=password], .hoja input[type=email] { width: 100%; font: inherit; font-size: 16px; padding: 11px 12px; background: #fff; color: var(--tinta); border: 1.5px solid var(--linea); border-radius: 10px; }
+  .hoja input[type=text]:focus, .hoja input[type=password]:focus, .hoja input[type=email]:focus { outline: 3px solid var(--pino-claro); border-color: var(--pino); }
   .tipos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
   .tipos label { position: relative; margin: 0; }
   .tipos input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
@@ -357,9 +358,9 @@
   .tipos input:focus-visible + span { outline: 3px solid var(--pino); outline-offset: 2px; }
   .tipos input:disabled + span { opacity: .4; }
   .tipos input:disabled { cursor: not-allowed; }
-  #dialogo .ayuda { font-size: 12.5px; color: var(--tinta-2); margin: 0; }
-  #dialogo .error { display: none; font-size: 14px; color: var(--sirena); font-weight: 600; margin: 0; }
-  #dialogo .error.visible { display: block; }
+  .hoja .ayuda { font-size: 12.5px; color: var(--tinta-2); margin: 0; }
+  .hoja .error, .error-msg { display: none; font-size: 14px; color: var(--sirena); font-weight: 600; margin: 0; }
+  .hoja .error.visible, .error-msg.visible { display: block; }
   .dlg-botones { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 2px; }
   .dlg-botones .boton { padding: 13px 10px; font-size: 16px; }
   .boton.secundario { background: transparent; border-color: var(--linea); color: var(--tinta); }
@@ -442,6 +443,73 @@
   #zona-pruebas .nota { font-size: 12px; color: var(--tinta-2); margin-top: 8px; }
   .pie { margin-top: 30px; font-size: 12px; color: var(--tinta-2); line-height: 1.6; }
 
+
+  /* ---- Pantalla de acceso ---- */
+  #acceso { display: none; min-height: 100vh; padding: 24px 16px; align-items: center; justify-content: center; }
+  #acceso.visible { display: flex; }
+  .acceso-caja { width: min(420px, 100%); background: var(--papel); border: 1px solid var(--linea); border-radius: 22px; padding: 26px 22px 22px; }
+  .acceso-caja .titular { font-size: clamp(28px, 8vw, 36px); }
+  .acceso-caja .subtitular { margin-top: 8px; }
+  .pestanas { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 20px 0 14px; }
+  .pestanas button { padding: 10px; font-weight: 700; background: #fff; border: 1.5px solid var(--linea); border-radius: 10px; cursor: pointer; }
+  .pestanas button.activa { background: var(--pino); border-color: var(--pino); color: #fff; }
+  .acceso-caja form { display: grid; gap: 12px; }
+  .acceso-caja form[hidden] { display: none; }
+  .campo { display: block; margin: 0; }
+  .campo > span { display: block; font-size: 13px; font-weight: 600; color: var(--tinta-2); margin-bottom: 5px; }
+  .campo input { width: 100%; font: inherit; font-size: 16px; padding: 11px 12px; background: #fff; color: var(--tinta); border: 1.5px solid var(--linea); border-radius: 10px; }
+  .campo input:focus { outline: 3px solid var(--pino-claro); border-color: var(--pino); }
+  .nota-acceso { font-size: 13px; color: var(--tinta-2); margin: 0; }
+  .aviso-acceso { background: var(--sirena-claro); border-left: 4px solid var(--sirena); border-radius: 6px; padding: 10px 12px; margin-top: 14px; font-size: 14px; }
+  .aviso-acceso[hidden] { display: none; }
+
+  /* ---- Barra: selector de vivienda ---- */
+  .vivienda-btn { display: flex; align-items: center; gap: 6px; background: none; border: 0; padding: 6px 8px 6px 2px; font: inherit; font-weight: 700; font-size: 17px; letter-spacing: -0.01em; cursor: pointer; text-align: left; }
+  .vivienda-btn svg { width: 16px; height: 16px; flex-shrink: 0; fill: none; stroke: var(--tinta-2); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ---- Bandas de aviso ---- */
+  .banda { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: #FBEFD2; border-left: 4px solid var(--ambar); border-radius: 6px; padding: 12px 14px; margin-bottom: 14px; font-size: 14px; }
+  .banda[hidden] { display: none; }
+  .banda.roja { background: var(--sirena-claro); border-left-color: var(--sirena); }
+  .banda button { flex-shrink: 0; background: none; border: 1.5px solid currentColor; border-radius: 8px; padding: 6px 10px; font-weight: 700; font-size: 13px; cursor: pointer; color: var(--ambar-texto); }
+  .banda.roja button { color: var(--sirena); }
+
+  .tarjeta.nuevo::after { content: "Nuevo"; position: absolute; top: 9px; left: 9px; background: var(--ambar); color: #2B1A00; font-size: 11px; font-weight: 800; letter-spacing: .03em; padding: 2px 8px; border-radius: 999px; z-index: 5; }
+
+  /* ---- Listas dentro de las hojas ---- */
+  .lista-casas { display: grid; gap: 8px; }
+  .casa { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; text-align: left; padding: 12px 14px; background: #fff; border: 1.5px solid var(--linea); border-radius: 12px; cursor: pointer; }
+  .casa.actual { border-color: var(--pino); background: var(--pino-claro); }
+  .casa .n { font-weight: 700; overflow-wrap: anywhere; }
+  .casa .r { font-size: 12.5px; color: var(--tinta-2); }
+  .en-linea { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; padding: 0 !important; }
+  .en-linea .boton { width: auto; padding: 11px 16px; font-size: 15px; }
+  .cuenta-caja { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 12px; border-top: 1px solid var(--linea); }
+  .cuenta-caja .quien { flex: 1 1 100%; font-size: 14px; color: var(--tinta-2); }
+  .fila-miembro { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--linea); font-size: 15px; }
+  .fila-miembro .r { font-size: 12.5px; color: var(--tinta-2); }
+  .fila-miembro button { background: none; border: 0; color: var(--sirena); font-weight: 600; font-size: 13px; text-decoration: underline; cursor: pointer; }
+  .codigo { font-family: ui-monospace, Consolas, monospace; font-size: 26px; font-weight: 800; letter-spacing: .12em; text-align: center; padding: 12px; background: #fff; border: 1.5px dashed var(--pino); border-radius: 12px; }
+  .token { font-family: ui-monospace, Consolas, monospace; font-size: 13px; word-break: break-all; padding: 12px; background: #fff; border: 1.5px dashed var(--ambar); border-radius: 12px; user-select: all; }
+  .caja-token[hidden] { display: none; }
+  .oculto { display: none !important; }
+  .hoja .nota { font-size: 13px; color: var(--tinta-2); margin: 0; }
+  .hoja hr { border: 0; border-top: 1px solid var(--linea); margin: 4px 0; width: 100%; }
+  .hoja .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .hoja .grid2 .boton { padding: 13px 10px; font-size: 16px; }
+
+  /* ---- Camara ---- */
+  .camara-botones { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
+  .camara-botones .nota { font-size: 13px; color: var(--tinta-2); }
+  .galeria { display: grid; grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 8px; margin-top: 12px; }
+  .galeria button { position: relative; padding: 0; border: 1.5px solid var(--linea); border-radius: 12px; overflow: hidden; background: var(--yeso); aspect-ratio: 4 / 3; cursor: pointer; }
+  .galeria img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .galeria .sello { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 6px 4px; font-size: 11px; color: #fff; text-align: left; background: linear-gradient(transparent, rgba(0, 0, 0, .65)); }
+  .visor { width: 100%; background: #0E1A17; border-radius: 12px; overflow: hidden; position: relative; aspect-ratio: 4 / 3; display: grid; place-items: center; }
+  .visor img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .visor .sobre { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-size: 15px; text-align: center; padding: 16px; background: rgba(14, 26, 23, .7); }
+  .visor .sobre[hidden] { display: none; }
+
   /* ---- Pantallas anchas: el titular y los botones van lado a lado ---- */
   @media (min-width: 720px) {
     .envoltura { padding-top: 24px; }
@@ -459,10 +527,49 @@
 </style>
 </head>
 <body>
-<div class="envoltura">
+
+<!-- ============ Acceso ============ -->
+<main id="acceso" aria-label="Acceso">
+  <div class="acceso-caja">
+    <h1 class="titular">Seguridad residencial</h1>
+    <p class="subtitular" id="acceso-sub">Inicia sesión para ver tu casa.</p>
+
+    <div class="pestanas" role="tablist" id="pestanas-acceso">
+      <button type="button" role="tab" id="tab-entrar" class="activa" onclick="cambiarPestana('entrar')">Entrar</button>
+      <button type="button" role="tab" id="tab-crear" onclick="cambiarPestana('crear')">Crear cuenta</button>
+    </div>
+
+    <form id="form-entrar" onsubmit="entrar(event)">
+      <label class="campo"><span>Correo</span><input type="email" id="in-email" autocomplete="username" required maxlength="120"></label>
+      <label class="campo"><span>Contraseña</span><input type="password" id="in-clave" autocomplete="current-password" required maxlength="200"></label>
+      <p class="error-msg" id="in-error" role="alert"></p>
+      <button type="submit" class="boton armar" id="in-boton">Entrar</button>
+    </form>
+
+    <form id="form-crear" onsubmit="crearCuenta(event)" hidden>
+      <label class="campo"><span>Nombre</span><input type="text" id="cr-nombre" autocomplete="name" required maxlength="60"></label>
+      <label class="campo"><span>Correo</span><input type="email" id="cr-email" autocomplete="username" required maxlength="120"></label>
+      <label class="campo"><span>Contraseña (mínimo 8 caracteres)</span><input type="password" id="cr-clave" autocomplete="new-password" required minlength="8" maxlength="200"></label>
+      <label class="campo" id="cr-codigo-fila"><span id="cr-codigo-etiqueta">Código de invitación</span><input type="text" id="cr-codigo" autocomplete="off" maxlength="12" placeholder="XXXX-XXXX" style="text-transform:uppercase"></label>
+      <p class="nota-acceso" id="cr-nota"></p>
+      <p class="error-msg" id="cr-error" role="alert"></p>
+      <button type="submit" class="boton armar" id="cr-boton">Crear cuenta</button>
+    </form>
+
+    <div class="aviso-acceso" id="acceso-aviso" hidden>
+      <div id="acceso-aviso-texto"></div>
+      <button type="button" class="boton-texto" style="margin-top:8px" onclick="arrancar()">Reintentar</button>
+    </div>
+  </div>
+</main>
+
+<div class="envoltura" id="app" hidden>
 
   <header class="barra">
-    <div class="vivienda" id="encabezado-vivienda">Vivienda</div>
+    <button class="vivienda-btn" id="encabezado-vivienda" onclick="abrirCasas()" aria-haspopup="dialog">
+      <span id="nombre-casa">Vivienda</span>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
     <div class="conexion" role="status">
       <span class="punto-vivo" id="punto-vivo"></span><span id="pie-texto">Conectando</span>
     </div>
@@ -471,6 +578,16 @@
   <div id="aviso" role="alert">
     <div id="aviso-texto"></div>
     <button onclick="refrescar(true)">Reintentar</button>
+  </div>
+
+  <div class="banda roja" id="banda-hub" hidden role="status">
+    <span id="banda-hub-texto"></span>
+    <button type="button" onclick="abrirGestion()">Dispositivos</button>
+  </div>
+  <div class="banda" id="banda-nodos" hidden role="status"><span id="banda-nodos-texto"></span></div>
+  <div class="banda" id="banda-nuevos" hidden role="status">
+    <span id="banda-nuevos-texto"></span>
+    <button type="button" onclick="revisarNuevos()">Revisar</button>
   </div>
 
   <section class="escena desarmado" id="escena" aria-label="Estado de la casa">
@@ -497,8 +614,9 @@
   </section>
 
   <div class="sin-sensores" id="sin-sensores" hidden>
-    <strong>Todavía no hay sensores.</strong> Aparecen solos en cuanto el nodo ESP32 envía su primera lectura,
-    y después puedes decidir si cada contacto es una puerta o una ventana. También puedes agregarlos a mano.
+    <strong>Todavía no hay sensores.</strong> Aparecen solos en cuanto un nodo se enciende cerca del concentrador,
+    sin esperar a que alguien abra una puerta. Después decides si cada contacto es una puerta o una ventana.
+    También puedes agregarlos a mano.
   </div>
 
   <button class="boton-texto agregar" id="boton-agregar" onclick="abrirDialogo(null)">+ Agregar sensor</button>
@@ -523,6 +641,17 @@
         <div class="cuando" id="sirena-cuando"></div>
       </div>
     </div>
+  </section>
+
+  <section class="grupo" id="grupo-camara" hidden aria-label="Cámara">
+    <div class="grupo-cab"><h2>Cámara</h2><span class="cuenta" id="camara-estado"></span></div>
+    <div class="camara-botones">
+      <button class="boton-texto" id="boton-foto" onclick="solicitarFoto()">Tomar foto</button>
+      <button class="boton-texto" id="boton-vivo" onclick="abrirVivo()">Ver en vivo</button>
+      <span class="nota" id="camara-nota"></span>
+    </div>
+    <div class="galeria" id="galeria"></div>
+    <button class="boton-texto" id="boton-mas-fotos" onclick="verMasFotos()" hidden style="margin-top:10px">Ver más fotos</button>
   </section>
 
   <div class="columna">
@@ -552,6 +681,13 @@
       </div>
       <div class="fila">
         <div>
+          <div class="titulo">Vivienda</div>
+          <div class="nota">Miembros, invitaciones y dispositivos</div>
+        </div>
+        <button class="boton-texto" onclick="abrirGestion()">Administrar</button>
+      </div>
+      <div class="fila">
+        <div>
           <div class="titulo">Probar la sirena</div>
           <div class="nota">Enciende la salida sin necesidad de una alarma</div>
         </div>
@@ -570,7 +706,7 @@
 
   <div class="pie">Proyecto de Carrera, UABC FCQI</div>
 
-  <dialog id="dialogo" aria-labelledby="dlg-titulo">
+  <dialog id="dialogo" class="hoja" aria-labelledby="dlg-titulo">
     <form id="dlg-form" onsubmit="guardarSensor(event)">
       <h3 id="dlg-titulo">Sensor</h3>
       <div>
@@ -603,13 +739,121 @@
     </form>
   </dialog>
 
+  <!-- Viviendas y cuenta -->
+  <dialog id="dlg-casas" class="hoja" aria-labelledby="casas-titulo">
+    <div class="hoja-cuerpo">
+      <h3 id="casas-titulo">Tus viviendas</h3>
+      <div class="lista-casas" id="lista-casas"></div>
+      <form class="en-linea" onsubmit="crearCasa(event)">
+        <label class="campo"><span>Nueva vivienda</span><input type="text" id="nueva-casa" maxlength="50" autocomplete="off" placeholder="Ej. Casa de la playa"></label>
+        <button type="submit" class="boton armar">Crear</button>
+      </form>
+      <form class="en-linea" onsubmit="unirseConCodigo(event)">
+        <label class="campo"><span>Unirme con un código de invitación</span><input type="text" id="unirse-codigo" maxlength="12" autocomplete="off" placeholder="XXXX-XXXX" style="text-transform:uppercase"></label>
+        <button type="submit" class="boton secundario">Unirme</button>
+      </form>
+      <p class="error-msg" id="casas-error" role="alert"></p>
+
+      <form id="form-clave" class="oculto" onsubmit="cambiarClave(event)" style="padding:0">
+        <h4>Cambiar contraseña</h4>
+        <label class="campo"><span>Contraseña actual</span><input type="password" id="clave-actual" autocomplete="current-password" required></label>
+        <label class="campo"><span>Contraseña nueva (mínimo 8 caracteres)</span><input type="password" id="clave-nueva" autocomplete="new-password" required minlength="8"></label>
+        <button type="submit" class="boton armar">Guardar contraseña</button>
+      </form>
+
+      <div class="cuenta-caja">
+        <div class="quien" id="cuenta-quien"></div>
+        <button type="button" class="boton-texto" onclick="$('form-clave').classList.toggle('oculto')">Cambiar contraseña</button>
+        <button type="button" class="boton-texto" onclick="cerrarSesion()">Cerrar sesión</button>
+      </div>
+      <button type="button" class="boton secundario" onclick="cerrarHoja('dlg-casas')">Cerrar</button>
+    </div>
+  </dialog>
+
+  <!-- Administracion de la vivienda actual -->
+  <dialog id="dlg-gestion" class="hoja" aria-labelledby="gestion-titulo">
+    <div class="hoja-cuerpo">
+      <h3 id="gestion-titulo">Vivienda</h3>
+
+      <form class="en-linea" id="form-renombrar" onsubmit="renombrarCasa(event)" style="padding:0">
+        <label class="campo"><span>Nombre</span><input type="text" id="gestion-nombre" maxlength="50" autocomplete="off"></label>
+        <button type="submit" class="boton secundario">Guardar</button>
+      </form>
+
+      <hr>
+      <h4>Miembros</h4>
+      <div id="gestion-miembros"></div>
+      <div id="gestion-invitar">
+        <button type="button" class="boton-texto" onclick="crearInvitacion()">Crear código de invitación</button>
+        <div class="oculto" id="gestion-codigo-caja" style="margin-top:10px">
+          <div class="codigo" id="gestion-codigo"></div>
+          <p class="nota" id="gestion-codigo-nota" style="margin-top:6px"></p>
+        </div>
+      </div>
+
+      <hr>
+      <h4>Dispositivos (concentrador y cámara)</h4>
+      <p class="nota" id="gestion-token-estado"></p>
+      <div id="gestion-token-acciones">
+        <button type="button" class="boton-texto" id="boton-token" onclick="generarToken()">Generar token nuevo</button>
+      </div>
+      <div class="caja-token" id="gestion-token-caja" hidden>
+        <div class="token" id="gestion-token"></div>
+        <p class="nota" style="margin-top:6px">Cópialo ahora, no se vuelve a mostrar. Pégalo en <b>DEVICE_TOKEN</b> del firmware del concentrador y de la cámara. En <b>BACKEND_BASE</b> va la dirección del servidor, con http y el puerto del concentrador.</p>
+        <button type="button" class="boton-texto" style="margin-top:8px" onclick="copiarToken()" id="boton-copiar-token">Copiar token</button>
+      </div>
+
+      <div id="gestion-peligro">
+        <hr>
+        <h4>Eliminar vivienda</h4>
+        <p class="nota">Borra la vivienda con sus sensores, historial y fotos. No se puede deshacer.</p>
+        <form onsubmit="eliminarCasa(event)" style="padding:0">
+          <label class="campo"><span>Escribe el nombre exacto para confirmar</span><input type="text" id="gestion-confirmar" autocomplete="off"></label>
+          <button type="submit" class="boton-eliminar" style="justify-self:start;padding:0">Eliminar esta vivienda</button>
+        </form>
+      </div>
+
+      <p class="error-msg" id="gestion-error" role="alert"></p>
+      <button type="button" class="boton secundario" onclick="cerrarHoja('dlg-gestion')">Cerrar</button>
+    </div>
+  </dialog>
+
+  <!-- Visor de una foto -->
+  <dialog id="dlg-foto" class="hoja" aria-labelledby="foto-titulo">
+    <div class="hoja-cuerpo">
+      <h3 id="foto-titulo">Foto</h3>
+      <div class="visor"><img id="foto-img" alt="Foto de la cámara"></div>
+      <p class="nota" id="foto-info"></p>
+      <div class="grid2">
+        <button type="button" class="boton secundario" onclick="cerrarHoja('dlg-foto')">Cerrar</button>
+        <button type="button" class="boton secundario" id="foto-borrar" onclick="borrarFoto()" style="color:var(--sirena)">Eliminar</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Vista en vivo -->
+  <dialog id="dlg-vivo" class="hoja" aria-labelledby="vivo-titulo" onclose="alCerrarVivo()">
+    <div class="hoja-cuerpo">
+      <h3 id="vivo-titulo">En vivo</h3>
+      <div class="visor">
+        <img id="vivo-img" alt="Vista en vivo de la cámara">
+        <div class="sobre" id="vivo-sobre">Conectando con la cámara</div>
+      </div>
+      <p class="nota" id="vivo-info"></p>
+      <button type="button" class="boton secundario" onclick="cerrarHoja('dlg-vivo')">Detener y cerrar</button>
+    </div>
+  </dialog>
+
 </div>
 
 <script>
 // ===================== Configuración =====================
 // La aplicación se sirve desde el mismo backend, por lo que las peticiones
 // van al mismo origen y no requieren una URL absoluta.
-const VIVIENDA = new URLSearchParams(location.search).get('vivienda') || 'casa-001';
+let VIVIENDA = null;      // vivienda que se esta viendo; se elige despues de iniciar sesion
+let sesion = null;        // { usuario, viviendas } cuando hay sesion iniciada
+let nodos = [];
+let temporizadorRefresco = null;
 const INTERVALO_MS = 2500;
 const TIEMPO_LIMITE_MS = 8000;
 const MOVIMIENTO_RECIENTE_S = 12;   // cuánto tiempo se considera "ahora" una detección
@@ -621,6 +865,9 @@ let primeraCarga = true;   // evita alertar por una alarma que ya estaba activa 
 
 const $ = (id) => document.getElementById(id);
 
+// Se lanza cuando el servidor responde 401: ya se mostro la pantalla de acceso
+class ErrorSesion extends Error {}
+
 // ===================== Utilidades =====================
 
 // fetch con tiempo límite, para distinguir una red caída de una espera larga
@@ -629,7 +876,12 @@ async function pedir(ruta, opciones = {}) {
   const reloj = setTimeout(() => control.abort(), TIEMPO_LIMITE_MS);
   try {
     const r = await fetch(ruta, { ...opciones, signal: control.signal });
-    if (!r.ok && r.status !== 404) throw new Error('El servidor respondió con código ' + r.status);
+    if (r.status === 401) { sesionCaducada(); throw new ErrorSesion('Sesión caducada'); }
+    if (!r.ok && r.status !== 404) {
+      const e = new Error('El servidor respondió con código ' + r.status);
+      e.status = r.status;
+      throw e;
+    }
     return r.status === 404 ? null : await r.json();
   } finally {
     clearTimeout(reloj);
@@ -653,10 +905,16 @@ function hace(iso) {
   return 'hace ' + Math.floor(seg / 86400) + ' días';
 }
 
-function nombreVivienda(id) {
-  // "casa-001" se muestra como "Casa 001"
-  const t = id.replace(/[-_]+/g, ' ');
-  return t.charAt(0).toUpperCase() + t.slice(1);
+function casaActual() {
+  return sesion && sesion.viviendas.find((v) => v.id === VIVIENDA) || null;
+}
+function nombreCasa() {
+  const c = casaActual();
+  return c ? c.nombre : 'Vivienda';
+}
+function esPropietario() {
+  const c = casaActual();
+  return !!c && c.rol === 'propietario';
 }
 
 /*
@@ -799,6 +1057,14 @@ function actualizarTarjeta(el, s) {
     clases = ['tarjeta', s.tipo];
     if (abierta) clases.push('abierta');
   }
+  const nodo = nodos.find((n) => n.nodo_id === s.nodo_id);
+  if (nodo && !nodo.en_linea) {
+    lectura = 'Sin señal';
+    cuando = 'el nodo no responde';
+    clases = clases.filter((c) => c !== 'abierta' && c !== 'actividad');
+    clases.push('sin-datos');
+  }
+  if (s.confirmado === false) clases.push('nuevo');
   if (sinDatos) clases.push('sin-datos');
   if (alarmaAqui) clases.push('disparado');
   if (estado.armado) clases.push('armado');
@@ -809,7 +1075,7 @@ function actualizarTarjeta(el, s) {
   ponerTexto(el, '.cuando', cuando);
   const cls = clases.join(' ');
   if (el.className !== cls) el.className = cls;
-  el.setAttribute('aria-label', s.nombre + ': ' + lectura + '. Toca para editar.');
+  el.setAttribute('aria-label', s.nombre + (s.confirmado === false ? ' (nuevo)' : '') + ': ' + lectura + '. Toca para editar.');
 }
 
 function pintarSensoresTarjetas() {
@@ -868,9 +1134,10 @@ async function enviarJson(ruta, metodo, cuerpo) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(cuerpo || {})
     });
+    if (r.status === 401 && !String(ruta).startsWith('/auth/')) { sesionCaducada(); throw new ErrorSesion('Sesión caducada'); }
     let datos = {};
     try { datos = await r.json(); } catch (e) { /* respuesta sin cuerpo */ }
-    return { ok: r.ok, datos };
+    return { ok: r.ok, status: r.status, datos };
   } finally {
     clearTimeout(reloj);
   }
@@ -878,7 +1145,7 @@ async function enviarJson(ruta, metodo, cuerpo) {
 
 function abrirDialogo(s) {
   editando = s || null;
-  $('dlg-titulo').textContent = s ? 'Editar sensor' : 'Agregar sensor';
+  $('dlg-titulo').textContent = s ? (s.confirmado === false ? 'Sensor nuevo' : 'Editar sensor') : 'Agregar sensor';
   $('dlg-nombre').value = s ? s.nombre : '';
   $('dlg-zona').value = s && s.zona ? s.zona : '';
   $('dlg-id').value = '';
@@ -896,7 +1163,8 @@ function abrirDialogo(s) {
     r.checked = r.value === (s ? s.tipo : 'puerta');
   }
   $('dlg-ayuda').textContent = s
-    ? 'Identificador: ' + s.sensor_id + (s.nodo_id ? ' · nodo ' + s.nodo_id : '') +
+    ? (s.confirmado === false ? 'Detectado automáticamente. Ponle un nombre y confirma qué es. ' : '') +
+      'Identificador: ' + s.sensor_id + (s.nodo_id ? ' · nodo ' + s.nodo_id : '') +
       (variable ? '. Un contacto puede ser puerta o ventana; un detector solo movimiento.' : '')
     : 'Usa el mismo identificador que el firmware (sensorId). Si el nodo aún no lo reporta, la tarjeta dirá "Sin datos".';
 
@@ -929,8 +1197,8 @@ async function guardarSensor(ev) {
   $('dlg-guardar').disabled = true;
   try {
     const r = editando
-      ? await enviarJson('/sensores/' + editando.id, 'PATCH', { nombre, tipo, zona, usuario: 'residente' })
-      : await enviarJson('/sensores', 'POST', { vivienda_id: VIVIENDA, sensor_id: $('dlg-id').value.trim(), nombre, tipo, zona, usuario: 'residente' });
+      ? await enviarJson('/sensores/' + editando.id, 'PATCH', { nombre, tipo, zona })
+      : await enviarJson('/sensores', 'POST', { vivienda_id: VIVIENDA, sensor_id: $('dlg-id').value.trim(), nombre, tipo, zona });
     if (!r.ok) {
       mostrarErrorDialogo((r.datos && (r.datos.mensaje || (r.datos.errores || []).join(' '))) || 'No se pudo guardar.');
       $('dlg-guardar').disabled = false;
@@ -939,6 +1207,7 @@ async function guardarSensor(ev) {
     cerrarDialogo();
     await refrescar(true);
   } catch (e) {
+    if (e instanceof ErrorSesion) return;
     mostrarErrorDialogo(mensajeDeError(e));
     $('dlg-guardar').disabled = false;
   }
@@ -961,7 +1230,7 @@ async function eliminarSensor() {
   }
   reiniciarEliminar();
   try {
-    const r = await enviarJson('/sensores/' + editando.id, 'DELETE', { usuario: 'residente' });
+    const r = await enviarJson('/sensores/' + editando.id, 'DELETE', {});
     if (!r.ok) { mostrarErrorDialogo((r.datos && r.datos.mensaje) || 'No se pudo eliminar.'); return; }
     cerrarDialogo();
     await refrescar(true);
@@ -999,6 +1268,11 @@ function construirHitos(mediciones, acciones) {
     alarma_silenciosa: ['Alarma en modo silencioso, sin sirena', 'alarma']
   };
   const conNombre = { sensor_agregado: 'Sensor agregado', sensor_editado: 'Sensor editado', sensor_eliminado: 'Sensor eliminado' };
+  textos.vista_en_vivo = ['Vista en vivo de la cámara', ''];
+  textos.foto_eliminada = ['Foto eliminada', ''];
+  textos.token_regenerado = ['Token de dispositivos regenerado', ''];
+  textos.miembro_eliminado = ['Miembro eliminado de la vivienda', ''];
+  textos.salio_de_vivienda = ['Una persona salió de la vivienda', ''];
   for (const a of acciones) {
     let titulo, clase = '';
     if (textos[a.accion]) {
@@ -1012,7 +1286,7 @@ function construirHitos(mediciones, acciones) {
     } else {
       titulo = a.accion;
     }
-    hitos.push({ t: a.creado_en, clase, titulo, detalle: a.usuario && a.usuario !== 'residente' ? ' desde ' + a.usuario : '' });
+    hitos.push({ t: a.creado_en, clase, titulo, detalle: a.usuario && a.usuario !== 'residente' ? ' · ' + a.usuario : '' });
   }
 
   return hitos.sort((x, y) => new Date(y.t) - new Date(x.t)).slice(0, 40);
@@ -1041,6 +1315,8 @@ function pintarHistorial(hitos) {
 // ===================== Comunicación =====================
 
 async function refrescar(manual = false) {
+  if (!VIVIENDA) return;
+  const casa = VIVIENDA;
   try {
     const q = encodeURIComponent(VIVIENDA);
     const [est, med, acc, sen] = await Promise.all([
@@ -1050,6 +1326,7 @@ async function refrescar(manual = false) {
       pedir('/sensores?vivienda_id=' + q)
     ]);
 
+    if (casa !== VIVIENDA) return;   // se cambio de vivienda mientras se esperaba
     if (est) {
       const antes = estado.alarma_activa;
       estado = est;
@@ -1062,14 +1339,18 @@ async function refrescar(manual = false) {
     const mediciones = med && med.mediciones ? med.mediciones : [];
     const acciones = acc && acc.acciones ? acc.acciones : [];
     sensores = sen && sen.sensores ? sen.sensores : [];
+    nodos = sen && sen.nodos ? sen.nodos : [];
     pintarSensoresTarjetas();
+    pintarBandas();
     pintarHistorial(construirHitos(mediciones, acciones));
 
     fallosSeguidos = 0;
     ocultarAviso();
     $('pie-texto').textContent = 'Actualizado ' + new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    $('encabezado-vivienda').textContent = nombreVivienda(VIVIENDA);
+    $('nombre-casa').textContent = nombreCasa();
   } catch (e) {
+    if (e instanceof ErrorSesion) return;
+    if (e.status === 403) { await recargarViviendas(); return; }
     fallosSeguidos++;
     // Se avisa al segundo fallo, para no alarmar por un parpadeo de la red
     if (manual || fallosSeguidos >= 2) mostrarAviso(mensajeDeError(e));
@@ -1085,11 +1366,11 @@ async function cambiarEstado(cambios) {
     const r = await pedir('/estado', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ vivienda_id: VIVIENDA, usuario: 'residente', ...cambios })
+      body: JSON.stringify({ vivienda_id: VIVIENDA, ...cambios })
     });
-    if (r) { estado = r; pintarEstado(); ocultarAviso(); refrescar(); }
+    if (r) { estado = { ...estado, ...r }; pintarEstado(); ocultarAviso(); refrescar(); }
   } catch (e) {
-    mostrarAviso(mensajeDeError(e));
+    if (!(e instanceof ErrorSesion)) mostrarAviso(mensajeDeError(e));
   } finally {
     ocupado = false;
     $('boton-armado').disabled = false;
@@ -1176,11 +1457,13 @@ async function suscribirPush() {
   if (!sub) {
     sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64AUint8(c.clave) });
   }
-  await pedir('/push/suscribir', {
+  // El telefono recibe los avisos de todas las viviendas de la cuenta
+  const casas = sesion ? sesion.viviendas : [];
+  await Promise.all(casas.map((c) => pedir('/push/suscribir', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ vivienda_id: VIVIENDA, suscripcion: sub.toJSON() })
-  });
+    body: JSON.stringify({ vivienda_id: c.id, suscripcion: sub.toJSON() })
+  })));
 }
 
 async function cancelarPush() {
@@ -1302,7 +1585,7 @@ function alertar(motivo) {
 
   // Con push activo el propio sistema ya muestra el aviso; esta es la alternativa sin push
   if (!pushDisponible() && window.isSecureContext && 'Notification' in window && Notification.permission === 'granted') {
-    try { new Notification('ALARMA ACTIVA', { body: (motivo || 'Se detectó actividad') + ' en ' + nombreVivienda(VIVIENDA), tag: 'alarma' }); } catch (e) { /* se ignora */ }
+    try { new Notification('ALARMA ACTIVA', { body: (motivo || 'Se detectó actividad') + ' en ' + nombreCasa(), tag: 'alarma' }); } catch (e) { /* se ignora */ }
   }
 }
 
@@ -1352,22 +1635,637 @@ async function limpiarHistorial() {
     });
     await refrescar(true);
   } catch (e) {
-    mostrarAviso(mensajeDeError(e));
+    if (!(e instanceof ErrorSesion)) mostrarAviso(mensajeDeError(e));
   } finally {
     boton.textContent = 'Borrar historial';
   }
 }
 
+// ===================== Hojas (dialogos) =====================
+
+function abrirHoja(id) {
+  const d = $(id);
+  if (typeof d.showModal === 'function') { if (!d.open) d.showModal(); } else d.setAttribute('open', '');
+}
+function cerrarHoja(id) {
+  const d = $(id);
+  if (typeof d.close === 'function') d.close(); else d.removeAttribute('open');
+}
+function mostrarError(idElemento, texto) {
+  const el = $(idElemento);
+  el.textContent = texto || '';
+  el.classList.toggle('visible', !!texto);
+}
+
+// Un boton que pide un segundo toque antes de ejecutar algo delicado
+function dosToques(boton, textoConfirmar, accion) {
+  if (boton._conf) {
+    clearTimeout(boton._conf); boton._conf = null;
+    boton.textContent = boton._orig;
+    accion();
+    return;
+  }
+  boton._orig = boton.textContent;
+  boton.textContent = textoConfirmar;
+  boton._conf = setTimeout(() => { boton.textContent = boton._orig; boton._conf = null; }, 4000);
+}
+
+// ===================== Acceso y sesión =====================
+
+function mostrarAcceso() {
+  $('app').hidden = true;
+  $('acceso').classList.add('visible');
+}
+
+function cambiarPestana(cual) {
+  const entrar = cual === 'entrar';
+  $('form-entrar').hidden = !entrar;
+  $('form-crear').hidden = entrar;
+  $('tab-entrar').classList.toggle('activa', entrar);
+  $('tab-crear').classList.toggle('activa', !entrar);
+  mostrarError('in-error', ''); mostrarError('cr-error', '');
+}
+
+// Ajusta el formulario de registro segun la politica del servidor
+async function prepararAcceso(mensaje) {
+  try {
+    const a = await pedir('/auth/estado');
+    const params = new URLSearchParams(location.search);
+    const codigo = params.get('codigo') || '';
+    if (a && !a.hay_usuarios) {
+      $('acceso-sub').textContent = 'Todavía no hay cuentas. Crea la primera: será la propietaria de las viviendas existentes.';
+      $('cr-codigo-fila').classList.add('oculto');
+      $('cr-nota').textContent = '';
+      cambiarPestana('crear');
+      $('pestanas-acceso').classList.add('oculto');
+    } else {
+      $('pestanas-acceso').classList.remove('oculto');
+      $('cr-codigo-fila').classList.remove('oculto');
+      const cerrado = a && !a.registro_abierto;
+      $('cr-codigo-etiqueta').textContent = cerrado ? 'Código de invitación (obligatorio)' : 'Código de invitación (opcional)';
+      $('cr-codigo').required = !!cerrado;
+      $('cr-nota').textContent = cerrado ? 'El registro es solo por invitación. Pide un código a quien administre la vivienda.' : '';
+      $('acceso-sub').textContent = mensaje || 'Inicia sesión para ver tu casa.';
+      if (codigo) { $('cr-codigo').value = codigo; cambiarPestana('crear'); } else cambiarPestana('entrar');
+    }
+  } catch (e) { /* si no responde, se muestra el aviso en arrancar */ }
+  mostrarAcceso();
+}
+
+async function arrancar() {
+  $('acceso-aviso').hidden = true;
+  try {
+    const r = await fetch('/auth/yo', { cache: 'no-store' });
+    if (r.status === 401) { sesion = null; await prepararAcceso(); return; }
+    if (!r.ok) throw new Error('El servidor respondió con código ' + r.status);
+    sesion = await r.json();
+  } catch (e) {
+    mostrarAcceso();
+    $('acceso-aviso-texto').textContent = mensajeDeError(e);
+    $('acceso-aviso').hidden = false;
+    return;
+  }
+  entrarALaApp();
+}
+
+function sesionCaducada() {
+  if (!sesion) return;
+  sesion = null; VIVIENDA = null;
+  detenerRefresco();
+  for (const d of document.querySelectorAll('dialog[open]')) { try { d.close(); } catch (e) { /* ya cerrado */ } }
+  prepararAcceso('Tu sesión terminó. Inicia sesión de nuevo.');
+}
+
+async function entrar(ev) {
+  ev.preventDefault();
+  mostrarError('in-error', '');
+  $('in-boton').disabled = true;
+  try {
+    const r = await enviarJson('/auth/entrar', 'POST', { email: $('in-email').value.trim(), clave: $('in-clave').value });
+    if (!r.ok) { mostrarError('in-error', r.datos.mensaje || 'No se pudo iniciar sesión.'); return; }
+    $('in-clave').value = '';
+    await arrancar();
+  } catch (e) {
+    mostrarError('in-error', mensajeDeError(e));
+  } finally {
+    $('in-boton').disabled = false;
+  }
+}
+
+async function crearCuenta(ev) {
+  ev.preventDefault();
+  mostrarError('cr-error', '');
+  $('cr-boton').disabled = true;
+  try {
+    const r = await enviarJson('/auth/registro', 'POST', {
+      nombre: $('cr-nombre').value.trim(), email: $('cr-email').value.trim(),
+      clave: $('cr-clave').value, codigo: $('cr-codigo').value.trim()
+    });
+    if (!r.ok) { mostrarError('cr-error', r.datos.mensaje || 'No se pudo crear la cuenta.'); return; }
+    $('cr-clave').value = '';
+    history.replaceState(null, '', location.pathname);   // quita ?codigo= de la direccion
+    await arrancar();
+  } catch (e) {
+    mostrarError('cr-error', mensajeDeError(e));
+  } finally {
+    $('cr-boton').disabled = false;
+  }
+}
+
+async function cerrarSesion() {
+  try { await cancelarPush(); } catch (e) { /* se continua */ }
+  try { await enviarJson('/auth/salir', 'POST', {}); } catch (e) { /* la sesion se descarta aqui de todos modos */ }
+  cerrarHoja('dlg-casas');
+  sesion = null; VIVIENDA = null;
+  detenerRefresco(); reiniciarVistas();
+  await prepararAcceso();
+}
+
+async function cambiarClave(ev) {
+  ev.preventDefault();
+  mostrarError('casas-error', '');
+  try {
+    const r = await enviarJson('/auth/clave', 'POST', { actual: $('clave-actual').value, nueva: $('clave-nueva').value });
+    if (!r.ok) { mostrarError('casas-error', r.datos.mensaje || 'No se pudo cambiar la contraseña.'); return; }
+    $('clave-actual').value = ''; $('clave-nueva').value = '';
+    $('form-clave').classList.add('oculto');
+    mostrarError('casas-error', '');
+    $('casas-error').textContent = 'Contraseña actualizada.';
+    $('casas-error').classList.add('visible');
+    $('casas-error').style.color = 'var(--pino)';
+    setTimeout(() => { $('casas-error').style.color = ''; mostrarError('casas-error', ''); }, 3000);
+  } catch (e) {
+    if (!(e instanceof ErrorSesion)) mostrarError('casas-error', mensajeDeError(e));
+  }
+}
+
+// ===================== Viviendas =====================
+
+function entrarALaApp() {
+  $('acceso').classList.remove('visible');
+  $('app').hidden = false;
+
+  const ids = sesion.viviendas.map((v) => v.id);
+  let guardada = null;
+  try { guardada = localStorage.getItem('vivienda'); } catch (e) { /* sin almacenamiento */ }
+  const deUrl = new URLSearchParams(location.search).get('vivienda');
+  const elegida = [deUrl, guardada].find((x) => x && ids.includes(x)) || ids[0] || null;
+
+  if (!elegida) { sinViviendas(); return; }
+  fijarVivienda(elegida);
+  iniciarRefresco();
+  cargarConfiguracion().then(sincronizarPush);
+}
+
+function sinViviendas() {
+  VIVIENDA = null;
+  detenerRefresco();
+  reiniciarVistas();
+  $('nombre-casa').textContent = 'Sin vivienda';
+  $('boton-armado').hidden = true;
+  $('escena').className = 'escena desarmado';
+  $('titular').textContent = 'Aún no tienes una vivienda';
+  $('subtitular').textContent = 'Crea una o únete con un código de invitación.';
+  $('pie-texto').textContent = '';
+  abrirCasas();
+}
+
+function fijarVivienda(id) {
+  VIVIENDA = id;
+  try { localStorage.setItem('vivienda', id); } catch (e) { /* sin almacenamiento */ }
+  reiniciarVistas();
+  $('boton-armado').hidden = false;
+  $('nombre-casa').textContent = nombreCasa();
+  refrescar(true);
+  refrescarCamara();
+  iniciarRefresco();
+}
+
+// Limpia lo que pertenecia a la vivienda anterior para no mezclar datos
+function reiniciarVistas() {
+  estado = { armado: false, modo_silencioso: false, actuador_activo: false, alarma_activa: false };
+  sensores = []; nodos = []; fotos = []; camara = null; limiteFotos = 12; llaveGaleria = '';
+  for (const el of tarjetas.values()) el.remove();
+  tarjetas.clear();
+  primeraCarga = true;
+  fallosSeguidos = 0;
+  $('lista').innerHTML = '<li class="cargando">Consultando el servidor</li>';
+  $('galeria').innerHTML = '';
+  $('grupo-camara').hidden = true;
+  $('grupo-contactos').hidden = true; $('grupo-movimiento').hidden = true; $('sin-sensores').hidden = true;
+  for (const b of ['banda-hub', 'banda-nodos', 'banda-nuevos']) $(b).hidden = true;
+  $('titular').textContent = 'Consultando la casa';
+  $('subtitular').textContent = '';
+  restaurarTitulo();
+}
+
+async function recargarViviendas() {
+  try {
+    const r = await pedir('/auth/yo');
+    if (!r) return;
+    sesion = r;
+    const ids = sesion.viviendas.map((v) => v.id);
+    if (!ids.length) { sinViviendas(); return; }
+    if (!ids.includes(VIVIENDA)) { fijarVivienda(ids[0]); return; }
+    $('nombre-casa').textContent = nombreCasa();
+  } catch (e) { /* se reintenta en el siguiente ciclo */ }
+}
+
+function iniciarRefresco() {
+  if (temporizadorRefresco) return;
+  let ciclos = 0;
+  temporizadorRefresco = setInterval(() => {
+    refrescar();
+    if (++ciclos % 4 === 0) refrescarCamara();
+  }, INTERVALO_MS);
+}
+function detenerRefresco() {
+  if (temporizadorRefresco) { clearInterval(temporizadorRefresco); temporizadorRefresco = null; }
+}
+
+function abrirCasas() {
+  pintarCasas();
+  mostrarError('casas-error', '');
+  abrirHoja('dlg-casas');
+}
+
+function pintarCasas() {
+  const lista = sesion ? sesion.viviendas : [];
+  $('lista-casas').innerHTML = lista.length ? lista.map((v) =>
+    '<button type="button" class="casa' + (v.id === VIVIENDA ? ' actual' : '') + '" data-id="' + esc(v.id) + '">' +
+      '<span><span class="n">' + esc(v.nombre) + '</span><br><span class="r">' +
+      (v.rol === 'propietario' ? 'Propietario' : 'Miembro') + ' · ' + v.miembros + (v.miembros === 1 ? ' persona' : ' personas') +
+      '</span></span><span class="r">' + (v.id === VIVIENDA ? 'Actual' : '') + '</span></button>'
+  ).join('') : '<p class="nota">Todavía no tienes viviendas.</p>';
+  $('cuenta-quien').textContent = sesion ? sesion.usuario.nombre + ' · ' + sesion.usuario.email : '';
+}
+$('lista-casas').addEventListener('click', (ev) => {
+  const b = ev.target.closest('.casa');
+  if (!b) return;
+  cerrarHoja('dlg-casas');
+  if (b.dataset.id !== VIVIENDA) fijarVivienda(b.dataset.id);
+});
+
+// Activa el aviso push en la vivienda nueva si este dispositivo ya los tenia activos
+function reanudarPush() {
+  if (avisosActivos && !motivoSinPush() && Notification.permission === 'granted') suscribirPush().catch(() => {});
+}
+
+async function crearCasa(ev) {
+  ev.preventDefault();
+  mostrarError('casas-error', '');
+  const nombre = $('nueva-casa').value.trim();
+  if (!nombre) { mostrarError('casas-error', 'Escribe un nombre para la vivienda.'); return; }
+  try {
+    const r = await enviarJson('/viviendas', 'POST', { nombre });
+    if (!r.ok) { mostrarError('casas-error', r.datos.mensaje || 'No se pudo crear la vivienda.'); return; }
+    $('nueva-casa').value = '';
+    tokenPendiente = r.datos.token;
+    await recargarViviendas();
+    cerrarHoja('dlg-casas');
+    fijarVivienda(r.datos.vivienda.id);
+    reanudarPush();
+    abrirGestion();
+  } catch (e) {
+    if (!(e instanceof ErrorSesion)) mostrarError('casas-error', mensajeDeError(e));
+  }
+}
+
+async function unirseConCodigo(ev) {
+  ev.preventDefault();
+  mostrarError('casas-error', '');
+  const codigo = $('unirse-codigo').value.trim();
+  if (!codigo) { mostrarError('casas-error', 'Escribe el código de invitación.'); return; }
+  try {
+    const r = await enviarJson('/invitaciones/aceptar', 'POST', { codigo });
+    if (!r.ok) { mostrarError('casas-error', r.datos.mensaje || 'No se pudo aceptar la invitación.'); return; }
+    $('unirse-codigo').value = '';
+    await recargarViviendas();
+    cerrarHoja('dlg-casas');
+    fijarVivienda(r.datos.vivienda_id);
+    reanudarPush();
+  } catch (e) {
+    if (!(e instanceof ErrorSesion)) mostrarError('casas-error', mensajeDeError(e));
+  }
+}
+
+// ===================== Administración de la vivienda =====================
+
+let tokenPendiente = null;   // token recien generado, que se muestra una sola vez
+
+function mostrarToken(token) {
+  $('gestion-token').textContent = token || '';
+  $('gestion-token-caja').hidden = !token;
+}
+
+async function abrirGestion() {
+  if (!VIVIENDA) return;
+  const c = casaActual();
+  const dueno = esPropietario();
+  $('gestion-titulo').textContent = c.nombre;
+  $('gestion-nombre').value = c.nombre;
+  for (const id of ['form-renombrar', 'gestion-invitar', 'gestion-peligro', 'gestion-token-acciones']) {
+    $(id).classList.toggle('oculto', !dueno);
+  }
+  $('gestion-token-estado').textContent = c.tiene_token
+    ? 'Esta vivienda tiene su propio token. Si generas uno nuevo, el anterior deja de funcionar y hay que actualizar el firmware.'
+    : 'Esta vivienda todavía usa el token global del servidor. Genera uno propio para que cada vivienda tenga el suyo.';
+  mostrarToken(tokenPendiente);
+  tokenPendiente = null;
+  $('gestion-codigo-caja').classList.add('oculto');
+  $('gestion-confirmar').value = '';
+  mostrarError('gestion-error', '');
+  abrirHoja('dlg-gestion');
+  cargarMiembros();
+}
+
+async function cargarMiembros() {
+  const cont = $('gestion-miembros');
+  try {
+    const r = await pedir('/viviendas/' + encodeURIComponent(VIVIENDA) + '/miembros');
+    const dueno = esPropietario();
+    cont.innerHTML = r.miembros.map((m) => {
+      const yo = m.usuario_id === r.soy;
+      const accion = yo ? '<button type="button" data-uid="' + m.usuario_id + '" data-yo="1">Salir</button>'
+        : (dueno ? '<button type="button" data-uid="' + m.usuario_id + '">Quitar</button>' : '');
+      return '<div class="fila-miembro"><div>' + esc(m.nombre) + (yo ? ' (tú)' : '') +
+        '<div class="r">' + esc(m.email) + ' · ' + (m.rol === 'propietario' ? 'Propietario' : 'Miembro') + '</div></div>' + accion + '</div>';
+    }).join('');
+  } catch (e) {
+    if (!(e instanceof ErrorSesion)) cont.textContent = mensajeDeError(e);
+  }
+}
+$('gestion-miembros').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-uid]');
+  if (!b) return;
+  dosToques(b, 'Toca de nuevo', async () => {
+    try {
+      const r = await enviarJson('/viviendas/' + encodeURIComponent(VIVIENDA) + '/miembros/' + b.dataset.uid, 'DELETE', {});
+      if (!r.ok) { mostrarError('gestion-error', r.datos.mensaje || 'No se pudo completar.'); return; }
+      if (b.dataset.yo) { cerrarHoja('dlg-gestion'); await recargarViviendas(); } else await cargarMiembros();
+    } catch (e) { if (!(e instanceof ErrorSesion)) mostrarError('gestion-error', mensajeDeError(e)); }
+  });
+});
+
+async function renombrarCasa(ev) {
+  ev.preventDefault();
+  const nombre = $('gestion-nombre').value.trim();
+  if (!nombre) return;
+  try {
+    const r = await enviarJson('/viviendas/' + encodeURIComponent(VIVIENDA), 'PATCH', { nombre });
+    if (!r.ok) { mostrarError('gestion-error', r.datos.mensaje || 'No se pudo renombrar.'); return; }
+    await recargarViviendas();
+    $('gestion-titulo').textContent = nombreCasa();
+  } catch (e) { if (!(e instanceof ErrorSesion)) mostrarError('gestion-error', mensajeDeError(e)); }
+}
+
+async function crearInvitacion() {
+  mostrarError('gestion-error', '');
+  try {
+    const r = await enviarJson('/viviendas/' + encodeURIComponent(VIVIENDA) + '/invitaciones', 'POST', {});
+    if (!r.ok) { mostrarError('gestion-error', r.datos.mensaje || 'No se pudo crear el código.'); return; }
+    $('gestion-codigo').textContent = r.datos.codigo;
+    $('gestion-codigo-nota').textContent = 'Sirve una sola vez y caduca en ' + r.datos.horas + ' horas. Quien lo reciba puede abrir ' +
+      location.origin + '/?codigo=' + r.datos.codigo + ' para crear su cuenta, o escribirlo en “Unirme con un código”.';
+    $('gestion-codigo-caja').classList.remove('oculto');
+  } catch (e) { if (!(e instanceof ErrorSesion)) mostrarError('gestion-error', mensajeDeError(e)); }
+}
+
+function generarToken() {
+  dosToques($('boton-token'), 'Toca de nuevo: el actual dejará de funcionar', async () => {
+    mostrarError('gestion-error', '');
+    try {
+      const r = await enviarJson('/viviendas/' + encodeURIComponent(VIVIENDA) + '/token', 'POST', {});
+      if (!r.ok) { mostrarError('gestion-error', r.datos.mensaje || 'No se pudo generar el token.'); return; }
+      mostrarToken(r.datos.token);
+      const c = casaActual(); if (c) c.tiene_token = true;
+      $('gestion-token-estado').textContent = 'Token nuevo generado. El anterior ya no funciona.';
+    } catch (e) { if (!(e instanceof ErrorSesion)) mostrarError('gestion-error', mensajeDeError(e)); }
+  });
+}
+
+async function copiarToken() {
+  const texto = $('gestion-token').textContent;
+  try {
+    await navigator.clipboard.writeText(texto);
+    $('boton-copiar-token').textContent = 'Copiado';
+  } catch (e) {
+    const r = document.createRange(); r.selectNodeContents($('gestion-token'));
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    $('boton-copiar-token').textContent = 'Selecciónalo y cópialo';
+  }
+  setTimeout(() => { $('boton-copiar-token').textContent = 'Copiar token'; }, 2500);
+}
+
+async function eliminarCasa(ev) {
+  ev.preventDefault();
+  mostrarError('gestion-error', '');
+  try {
+    const r = await enviarJson('/viviendas/' + encodeURIComponent(VIVIENDA), 'DELETE', { confirmar: $('gestion-confirmar').value });
+    if (!r.ok) { mostrarError('gestion-error', r.datos.mensaje || 'No se pudo eliminar.'); return; }
+    cerrarHoja('dlg-gestion');
+    try { localStorage.removeItem('vivienda'); } catch (e) { /* sin almacenamiento */ }
+    VIVIENDA = null;
+    await recargarViviendas();
+  } catch (e) { if (!(e instanceof ErrorSesion)) mostrarError('gestion-error', mensajeDeError(e)); }
+}
+
+// ===================== Avisos de sensores nuevos, nodos y concentrador =====================
+
+function pintarBandas() {
+  const nuevos = sensores.filter((s) => s.confirmado === false);
+  $('banda-nuevos').hidden = nuevos.length === 0;
+  if (nuevos.length) {
+    $('banda-nuevos-texto').textContent = nuevos.length === 1
+      ? 'Detectamos un sensor nuevo. Ponle nombre y elige si es puerta o ventana.'
+      : 'Detectamos ' + nuevos.length + ' sensores nuevos. Ponles nombre y elige si son puertas o ventanas.';
+  }
+
+  let hub = '';
+  if (estado.hub_en_linea === false) {
+    hub = estado.hub_visto
+      ? 'El concentrador no se comunica con el servidor desde ' + hace(estado.hub_visto).replace('hace ', 'hace ') + '. Mientras tanto la alarma no puede avisar.'
+      : 'Todavía no se conecta ningún concentrador. En Dispositivos está el token que debe llevar.';
+  }
+  $('banda-hub').hidden = !hub;
+  $('banda-hub-texto').textContent = hub;
+
+  const caidos = nodos.filter((n) => !n.en_linea);
+  $('banda-nodos').hidden = caidos.length === 0 || estado.hub_en_linea === false;
+  if (caidos.length) {
+    $('banda-nodos-texto').textContent = caidos.length === 1
+      ? 'El nodo ' + caidos[0].nodo_id + ' no responde (última señal ' + hace(caidos[0].ultimo_visto) + '). Revisa su alimentación.'
+      : caidos.length + ' nodos no responden. Revisa su alimentación.';
+  }
+}
+
+function revisarNuevos() {
+  const s = sensores.find((x) => x.confirmado === false);
+  if (s) abrirDialogo(s);
+}
+
+// ===================== Cámara =====================
+
+let camara = null;
+let fotos = [];
+let limiteFotos = 12;
+let llaveGaleria = '';
+let fotoAbierta = null;
+
+async function refrescarCamara() {
+  if (!VIVIENDA) return;
+  const casa = VIVIENDA;
+  try {
+    const q = encodeURIComponent(VIVIENDA);
+    const [c, f] = await Promise.all([
+      pedir('/camara/estado?vivienda_id=' + q),
+      pedir('/fotos?vivienda_id=' + q + '&limite=' + limiteFotos)
+    ]);
+    if (casa !== VIVIENDA) return;
+    camara = c;
+    fotos = f && f.fotos ? f.fotos : [];
+    pintarCamara();
+  } catch (e) { /* la cámara es opcional: un fallo no debe molestar */ }
+}
+
+function pintarCamara() {
+  const visible = !!camara && (camara.registrada || fotos.length > 0);
+  $('grupo-camara').hidden = !visible;
+  if (!visible) return;
+  $('camara-estado').textContent = camara.en_linea ? 'En línea' : 'Sin conexión';
+  $('boton-foto').disabled = !camara.en_linea;
+  $('boton-vivo').disabled = !camara.en_linea;
+
+  const llave = fotos.map((f) => f.id).join(',');
+  if (llave !== llaveGaleria) {
+    llaveGaleria = llave;
+    $('galeria').innerHTML = fotos.map((f) =>
+      '<button type="button" data-id="' + f.id + '" aria-label="Foto: ' + esc(f.motivo || '') + '">' +
+      '<img loading="lazy" decoding="async" alt="" src="/fotos/' + f.id + '/imagen">' +
+      '<span class="sello">' + esc(formatearFecha(f.creado_en)) + '</span></button>').join('');
+  }
+  $('boton-mas-fotos').hidden = fotos.length < limiteFotos;
+}
+$('galeria').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-id]');
+  if (b) abrirFoto(Number(b.dataset.id));
+});
+
+function verMasFotos() { limiteFotos += 24; refrescarCamara(); }
+
+async function solicitarFoto() {
+  const boton = $('boton-foto');
+  boton.disabled = true;
+  $('camara-nota').textContent = '';
+  try {
+    const r = await enviarJson('/camara/solicitar', 'POST', { vivienda_id: VIVIENDA });
+    if (!r.ok) { $('camara-nota').textContent = r.datos.mensaje || 'No se pudo pedir la foto.'; return; }
+    $('camara-nota').textContent = 'Foto en camino…';
+    let n = 0;
+    const t = setInterval(() => {
+      refrescarCamara();
+      if (++n >= 6) { clearInterval(t); $('camara-nota').textContent = ''; }
+    }, 1500);
+  } catch (e) {
+    if (!(e instanceof ErrorSesion)) $('camara-nota').textContent = mensajeDeError(e);
+  } finally {
+    boton.disabled = !(camara && camara.en_linea);
+  }
+}
+
+function abrirFoto(id) {
+  const f = fotos.find((x) => x.id === id);
+  if (!f) return;
+  fotoAbierta = f;
+  $('foto-img').src = '/fotos/' + id + '/imagen';
+  $('foto-titulo').textContent = f.motivo || 'Foto';
+  $('foto-info').textContent = formatearFecha(f.creado_en) + ' · ' + Math.round(f.bytes / 1024) + ' KB';
+  $('foto-borrar').hidden = !esPropietario();
+  abrirHoja('dlg-foto');
+}
+
+function borrarFoto() {
+  if (!fotoAbierta) return;
+  const id = fotoAbierta.id;
+  dosToques($('foto-borrar'), 'Toca de nuevo', async () => {
+    try {
+      const r = await enviarJson('/fotos/' + id, 'DELETE', {});
+      if (!r.ok) { $('foto-info').textContent = r.datos.mensaje || 'No se pudo eliminar.'; return; }
+      cerrarHoja('dlg-foto');
+      refrescarCamara();
+    } catch (e) { if (!(e instanceof ErrorSesion)) $('foto-info').textContent = mensajeDeError(e); }
+  });
+}
+
+// ---------- Vista en vivo ----------
+
+let vivoActivo = false;
+let vivoTimer = null;
+let vivoEspera = null;
+
+function formatoMinSeg(seg) {
+  seg = Math.max(0, Math.round(seg));
+  return Math.floor(seg / 60) + ':' + String(seg % 60).padStart(2, '0');
+}
+
+async function abrirVivo() {
+  $('vivo-info').textContent = '';
+  $('vivo-sobre').hidden = false;
+  $('vivo-sobre').textContent = 'Conectando con la cámara';
+  $('vivo-img').removeAttribute('src');
+  abrirHoja('dlg-vivo');
+  try {
+    const r = await enviarJson('/camara/vivo/iniciar', 'POST', { vivienda_id: VIVIENDA });
+    if (!r.ok) { $('vivo-sobre').textContent = r.datos.mensaje || 'No se pudo iniciar la vista en vivo.'; return; }
+    vivoActivo = true;
+    $('vivo-img').src = '/camara/vivo?vivienda_id=' + encodeURIComponent(VIVIENDA) + '&t=' + Date.now();
+    // En un flujo multipart el evento load no es fiable; se comprueba si ya hay imagen
+    let intentos = 0;
+    vivoEspera = setInterval(() => {
+      intentos++;
+      if ($('vivo-img').naturalWidth > 0) { $('vivo-sobre').hidden = true; clearInterval(vivoEspera); vivoEspera = null; }
+      else if (intentos === 16) $('vivo-sobre').textContent = 'Esperando imagen. Revisa que la cámara esté encendida y con Wi-Fi.';
+    }, 500);
+    vivoTimer = setInterval(vigilarVivo, 2000);
+  } catch (e) {
+    if (!(e instanceof ErrorSesion)) $('vivo-sobre').textContent = mensajeDeError(e);
+  }
+}
+
+async function vigilarVivo() {
+  try {
+    const c = await pedir('/camara/estado?vivienda_id=' + encodeURIComponent(VIVIENDA));
+    if (!c) return;
+    if (!c.vivo.activo) { finVivo('La sesión terminó. Se alcanzó el tiempo máximo o se cerró desde otro dispositivo.'); return; }
+    $('vivo-info').textContent = 'Quedan ' + formatoMinSeg(c.vivo.restante_s) + ' de esta sesión · hoy llevas ' +
+      Math.round(c.cuota.usado_min) + ' de ' + c.cuota.max_min + ' min';
+  } catch (e) { /* un fallo aislado no cierra la vista */ }
+}
+
+function finVivo(mensaje) {
+  if (vivoTimer) { clearInterval(vivoTimer); vivoTimer = null; }
+  if (vivoEspera) { clearInterval(vivoEspera); vivoEspera = null; }
+  vivoActivo = false;
+  $('vivo-img').removeAttribute('src');   // corta la conexion del flujo
+  $('vivo-sobre').hidden = false;
+  $('vivo-sobre').textContent = mensaje || '';
+}
+
+function alCerrarVivo() {
+  if (vivoActivo && VIVIENDA) {
+    enviarJson('/camara/vivo/detener', 'POST', { vivienda_id: VIVIENDA }).catch(() => {});
+  }
+  finVivo('');
+}
+
 // ===================== Arranque =====================
 avisosActivos = leerPreferencia();
 pintarAvisos();
-cargarConfiguracion().then(sincronizarPush);
-refrescar();
-setInterval(refrescar, INTERVALO_MS);
+arrancar();
 
 // Al volver a la aplicación tras dejarla en segundo plano, actualizar de inmediato
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) refrescar();
+  if (!document.hidden && VIVIENDA) { refrescar(); refrescarCamara(); }
 });
 </script>
 </body>

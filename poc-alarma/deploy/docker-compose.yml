@@ -56,6 +56,21 @@ services:
       NTFY_TOPIC: ${NTFY_TOPIC:-}
       # Habilita el boton de borrar historial. Solo para la etapa de pruebas.
       MODO_PRUEBAS: ${MODO_PRUEBAS:-false}
+      # Cuentas: con false solo se puede crear la primera cuenta y despues se
+      # entra por codigo de invitacion. Con true cualquiera puede registrarse.
+      REGISTRO_ABIERTO: ${REGISTRO_ABIERTO:-false}
+      # Camara. Las fotos son archivos en disco; el VPS es de 40 GB, asi que hay
+      # topes de dias y de espacio. No se guarda video, solo fotos.
+      FOTOS_DIR: /app/datos/fotos
+      FOTOS_DIAS: ${FOTOS_DIAS:-14}
+      FOTOS_MB_VIVIENDA: ${FOTOS_MB_VIVIENDA:-300}
+      FOTOS_MB_TOTAL: ${FOTOS_MB_TOTAL:-1500}
+      FOTOS_MIN_LIBRE_MB: ${FOTOS_MIN_LIBRE_MB:-1500}
+      VIVO_SESION_MAX_S: ${VIVO_SESION_MAX_S:-300}
+      VIVO_DIA_MAX_MIN: ${VIVO_DIA_MAX_MIN:-60}
+      CAMARA_RAFAGA: ${CAMARA_RAFAGA:-3}
+    volumes:
+      - datos_fotos:/app/datos
     depends_on:
       db:
         condition: service_healthy
@@ -77,6 +92,7 @@ services:
 
 volumes:
   datos_postgres:
+  datos_fotos:
 
 networks:
   alarma:

@@ -56,12 +56,16 @@ const char* WIFI_PASSWORD = "PASSWORD_DE_TU_RED";
 // URL del backend desplegado. Debe terminar sin diagonal final.
 const char* BACKEND_BASE  = "http://privadaochil.ddns.net:8080";
 
-// Debe coincidir EXACTAMENTE con el DEVICE_TOKEN del archivo .env del servidor.
-const char* DEVICE_TOKEN  = "alarma-uabc-2026";
+// Token de ESTA vivienda. Se genera en la aplicacion: Ajustes > Vivienda >
+// Administrar > Dispositivos > "Generar token nuevo" (empieza con "hv_" y solo se
+// muestra una vez). El servidor deduce la vivienda a partir del token.
+// Compatibilidad: una vivienda que aun no tiene token propio acepta el
+// DEVICE_TOKEN global del archivo .env del servidor.
+const char* DEVICE_TOKEN  = "PEGA_AQUI_EL_TOKEN_hv_...";
 
-// Identificacion logica dentro del modelo vivienda / zona / nodo / sensor
+// Solo se usa con el token global antiguo; con un token por vivienda se ignora.
 const char* VIVIENDA_ID = "casa-001";
-const char* NODO_ID     = "nodo-01";
+const char* NODO_ID     = "hub-01";   // nombre de este concentrador (sensores locales)
 
 // ===================== Nodos perifericos (ESP-NOW) =====================
 
@@ -78,7 +82,14 @@ uint8_t MAC_C3[6] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 
 // ===================== Hardware =====================
 
-const int PIN_SALIDA = 2;   // LED integrado o entrada del relevador de la sirena
+// Salida de la sirena: buzzer ACTIVO (el que suena solo con voltaje) entre este
+// pin y GND, o la entrada de un modulo relevador. Con un buzzer pasivo no
+// sonaria bien: necesitaria una señal de frecuencia (tone) en vez de HIGH/LOW.
+// El GPIO 4 es de los pines seguros; si activas USAR_SENSORES_LOCALES no lo
+// repitas en la tabla de contactos.
+const int PIN_SALIDA = 4;
+// LED integrado: refleja la salida para ver el estado aunque no haya buzzer
+const int PIN_LED_ESTADO = 2;
 
 /*
  * Contactos magneticos MC-38. Un cable al pin y el otro a GND; el pull-up
@@ -150,6 +161,19 @@ struct __attribute__((packed)) PaqueteSensor {
 
 struct OrigenRemoto { uint8_t mac[6]; uint32_t ultimaSecuencia; bool usado; };
 struct EstadoRemoto { char sensorId[24]; int valor; bool usado; };
+
+// Registro de nodos escuchados (para el latido). Va aqui por la misma razon.
+const int MAX_NODOS = 6;
+const int MAX_SENSORES_NODO = 6;
+struct SensorVisto { char sensorId[24]; char variable[16]; char zona[16]; };
+struct NodoVisto {
+  bool usado;
+  char nodoId[16];
+  unsigned long ultimoMs;
+  int rssi;
+  int numSensores;
+  SensorVisto sensores[MAX_SENSORES_NODO];
+};
 
 
 // ===================== Parametros de procesamiento =====================
@@ -523,6 +547,7 @@ void consultarEstado() {
   HTTPClient http;
   http.setTimeout(TIMEOUT_HTTP_MS);
   http.begin(clienteRed, url);
+  http.addHeader("X-Device-Token", DEVICE_TOKEN);
   int codigo = http.GET();
 
   if (codigo == 200) {
@@ -573,6 +598,7 @@ void actualizarSalida() {
     nivel = SALIDA_INTERMITENTE ? ((millis() / INTERVALO_PARPADEO_MS) % 2 == 0) : true;
   }
   digitalWrite(PIN_SALIDA, nivel ? HIGH : LOW);
+  digitalWrite(PIN_LED_ESTADO, nivel ? HIGH : LOW);
 }
 
 // ===================== Recepcion de nodos perifericos (ESP-NOW) =====================
@@ -583,10 +609,11 @@ void actualizarSalida() {
 const int CAP_COLA_RX = 8;
 PaqueteSensor colaRx[CAP_COLA_RX];
 uint8_t colaRxMac[CAP_COLA_RX][6];
+int8_t colaRxRssi[CAP_COLA_RX];
 volatile int rxEscribir = 0;
 volatile int rxLeer = 0;
 
-void guardarPaqueteRx(const uint8_t* mac, const uint8_t* datos, int largo) {
+void guardarPaqueteRx(const uint8_t* mac, const uint8_t* datos, int largo, int rssi) {
   if (largo != (int)sizeof(PaqueteSensor)) return;
   const PaqueteSensor* p = (const PaqueteSensor*)datos;
   if (p->magia[0] != 'S' || p->magia[1] != 'R' || p->version != 1) return;
@@ -594,17 +621,18 @@ void guardarPaqueteRx(const uint8_t* mac, const uint8_t* datos, int largo) {
   if (sig == rxLeer) return;   // cola llena: el nodo periferico reintentara
   memcpy(&colaRx[rxEscribir], datos, sizeof(PaqueteSensor));
   memcpy(colaRxMac[rxEscribir], mac, 6);
+  colaRxRssi[rxEscribir] = (int8_t)rssi;
   rxEscribir = sig;
 }
 
 // La firma de la funcion de recepcion cambio en IDF 5 (core ESP32 3.x)
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
 void alRecibirEspNow(const esp_now_recv_info_t* info, const uint8_t* datos, int largo) {
-  guardarPaqueteRx(info->src_addr, datos, largo);
+  guardarPaqueteRx(info->src_addr, datos, largo, info->rx_ctrl ? info->rx_ctrl->rssi : 0);
 }
 #else
 void alRecibirEspNow(const uint8_t* mac, const uint8_t* datos, int largo) {
-  guardarPaqueteRx(mac, datos, largo);
+  guardarPaqueteRx(mac, datos, largo, 0);   // el core antiguo no entrega el RSSI
 }
 #endif
 
@@ -655,18 +683,129 @@ EstadoRemoto* crearEstado(const char* sensorId, int valor) {
   return nullptr;
 }
 
-void procesarPaqueteRemoto(PaqueteSensor &p, const uint8_t* mac) {
-  if (p.tipo == TIPO_HOLA) return;
+// ===================== Registro automatico de nodos y sensores =====================
+/*
+ * El concentrador recuerda cada nodo que escucha y los sensores que declara, y
+ * cada LATIDO_INTERVALO_MS (o de inmediato si aparece algo nuevo) los reporta
+ * en un solo POST /nodos/latido. Asi la aplicacion descubre sensores sin que el
+ * residente toque el firmware, y sabe si un nodo dejo de comunicarse.
+ */
+const unsigned long LATIDO_INTERVALO_MS = 30000;
 
+NodoVisto nodosVistos[MAX_NODOS];
+bool latidoUrgente = false;
+unsigned long tUltimoLatido = 0;
+
+NodoVisto* tocarNodoVisto(const char* nodoId, int rssi) {
+  NodoVisto* libre = nullptr;
+  for (int i = 0; i < MAX_NODOS; i++) {
+    if (nodosVistos[i].usado && strcmp(nodosVistos[i].nodoId, nodoId) == 0) {
+      nodosVistos[i].ultimoMs = millis();
+      if (rssi != 0) nodosVistos[i].rssi = rssi;
+      return &nodosVistos[i];
+    }
+    if (!nodosVistos[i].usado && !libre) libre = &nodosVistos[i];
+  }
+  if (!libre) return nullptr;
+  memset(libre, 0, sizeof(*libre));
+  libre->usado = true;
+  strncpy(libre->nodoId, nodoId, sizeof(libre->nodoId) - 1);
+  libre->ultimoMs = millis();
+  libre->rssi = rssi;
+  latidoUrgente = true;   // nodo nuevo: avisar ya
+  return libre;
+}
+
+void recordarSensor(NodoVisto* n, const char* sensorId, const char* variable, const char* zona) {
+  if (!n || !sensorId[0]) return;
+  for (int i = 0; i < n->numSensores; i++) {
+    if (strcmp(n->sensores[i].sensorId, sensorId) == 0) return;
+  }
+  if (n->numSensores >= MAX_SENSORES_NODO) return;
+  SensorVisto &s = n->sensores[n->numSensores++];
+  strncpy(s.sensorId, sensorId, sizeof(s.sensorId) - 1);
+  strncpy(s.variable, variable, sizeof(s.variable) - 1);
+  strncpy(s.zona, zona, sizeof(s.zona) - 1);
+  latidoUrgente = true;   // sensor nuevo: aparece en la app sin esperar
+}
+
+void enviarLatidos() {
+  if (WiFi.status() != WL_CONNECTED) return;
+  tUltimoLatido = millis();
+  latidoUrgente = false;
+
+  JsonDocument doc;
+  JsonArray lista = doc["nodos"].to<JsonArray>();
+
+  // Sensores conectados directamente a este concentrador
+  if (NUM_CONTACTOS + NUM_PIRS > 0) {
+    JsonObject o = lista.add<JsonObject>();
+    o["nodo_id"] = NODO_ID;
+    o["hace_s"] = 0;
+    JsonArray ss = o["sensores"].to<JsonArray>();
+    for (int i = 0; i < NUM_CONTACTOS; i++) {
+      JsonObject s = ss.add<JsonObject>();
+      s["sensor_id"] = contactos[i].sensorId; s["variable"] = "estado_puerta"; s["zona"] = contactos[i].zona;
+    }
+    for (int i = 0; i < NUM_PIRS; i++) {
+      JsonObject s = ss.add<JsonObject>();
+      s["sensor_id"] = pirs[i].sensorId; s["variable"] = "movimiento"; s["zona"] = pirs[i].zona;
+    }
+  }
+
+  for (int i = 0; i < MAX_NODOS; i++) {
+    NodoVisto &n = nodosVistos[i];
+    if (!n.usado) continue;
+    JsonObject o = lista.add<JsonObject>();
+    o["nodo_id"] = n.nodoId;
+    o["hace_s"] = (millis() - n.ultimoMs) / 1000;
+    if (n.rssi != 0) o["rssi"] = n.rssi;
+    JsonArray ss = o["sensores"].to<JsonArray>();
+    for (int j = 0; j < n.numSensores; j++) {
+      JsonObject s = ss.add<JsonObject>();
+      s["sensor_id"] = n.sensores[j].sensorId;
+      s["variable"] = n.sensores[j].variable;
+      s["zona"] = n.sensores[j].zona;
+    }
+  }
+
+  String cuerpo;
+  serializeJson(doc, cuerpo);
+
+  HTTPClient http;
+  http.setTimeout(TIMEOUT_HTTP_MS);
+  http.begin(clienteRed, String(BACKEND_BASE) + "/nodos/latido");
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("X-Device-Token", DEVICE_TOKEN);
+  int codigo = http.POST(cuerpo);
+  http.end();
+
+  Serial.print("[Latido] nodos="); Serial.print(lista.size());
+  Serial.print(" codigo="); Serial.println(codigo);
+  if (codigo == 401 || codigo == 403) Serial.println("   Token rechazado: revisa DEVICE_TOKEN.");
+  if (codigo != 200) latidoUrgente = false;   // se reintenta en el siguiente intervalo
+}
+
+void atenderLatidos() {
+  unsigned long espera = latidoUrgente ? 1500 : LATIDO_INTERVALO_MS;   // agrupa varios hallazgos
+  if (millis() - tUltimoLatido >= espera) enviarLatidos();
+}
+
+void procesarPaqueteRemoto(PaqueteSensor &p, const uint8_t* mac, int rssi) {
   // Se garantiza el fin de cada texto antes de usarlo
   p.nodoId[sizeof(p.nodoId) - 1] = '\0';
   p.sensorId[sizeof(p.sensorId) - 1] = '\0';
   p.variable[sizeof(p.variable) - 1] = '\0';
   p.zona[sizeof(p.zona) - 1] = '\0';
 
+  // Cualquier paquete valido demuestra que el nodo esta vivo
+  NodoVisto* nodo = tocarNodoVisto(p.nodoId, rssi);
+  if (p.tipo == TIPO_HOLA) return;
+
   bool esContacto = strcmp(p.variable, "estado_puerta") == 0;
   bool esMovimiento = strcmp(p.variable, "movimiento") == 0;
   if (!esContacto && !esMovimiento) return;
+  recordarSensor(nodo, p.sensorId, p.variable, p.zona);
   if (esDuplicado(mac, p.secuencia)) return;
 
   Serial.print("[ESP-NOW] ");
@@ -708,7 +847,7 @@ void atenderRemotos() {
     memcpy(&p, &colaRx[rxLeer], sizeof(p));
     memcpy(mac, colaRxMac[rxLeer], 6);
     rxLeer = (rxLeer + 1) % CAP_COLA_RX;
-    procesarPaqueteRemoto(p, mac);
+    procesarPaqueteRemoto(p, mac, colaRxRssi[(rxLeer + CAP_COLA_RX - 1) % CAP_COLA_RX]);
   }
 }
 
@@ -760,6 +899,8 @@ void setup() {
   }
   pinMode(PIN_SALIDA, OUTPUT);
   digitalWrite(PIN_SALIDA, LOW);
+  pinMode(PIN_LED_ESTADO, OUTPUT);
+  digitalWrite(PIN_LED_ESTADO, LOW);
 
   for (int i = 0; i < NUM_CONTACTOS; i++) {
     contactos[i].estable = digitalRead(contactos[i].pin);
@@ -861,6 +1002,9 @@ void loop() {
 
   // ---- Eventos recibidos de los nodos perifericos por ESP-NOW ----
   atenderRemotos();
+
+  // ---- Latido por lotes: registro automatico y vigilancia de nodos ----
+  atenderLatidos();
 
   // ---- Red y sincronizacion, sin detener el ciclo ----
   atenderWiFi();

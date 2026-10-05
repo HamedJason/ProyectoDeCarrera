@@ -42,23 +42,29 @@
 // linea "[MAC] Esta placa (nodo receptor): AA:BB:CC:DD:EE:FF". Copiala aqui.
 uint8_t MAC_RECEPTOR[6] = { 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF };
 
-// Identificacion de este nodo y sus sensores. Con estos mismos identificadores
-// la aplicacion conserva el historial y los nombres que ya les pusiste.
-const char* NODO_ID          = "nodo-c3-01";
-const char* ZONA             = "sala";
-const char* ID_PIR           = "pir-sala-01";
+// ---- Identificacion AUTOMATICA ----
+// El nodo se identifica solo con los ultimos 3 bytes de su MAC, por ejemplo
+// "c3-a1b2c3", y sus sensores como "c3-a1b2c3-gpio4" o "c3-a1b2c3-pir". No hay
+// que escribir ningun identificador: al encenderlo, la aplicacion lo descubre
+// y muestra los sensores con la etiqueta "Nuevo". Ahi se les pone nombre y se
+// elige si son puerta o ventana.
+//
+// Solo para conservar los identificadores de un nodo que ya estaba registrado
+// con el firmware anterior, escribe aqui el identificador antiguo (si no, "").
+const char* NODO_ID_ANTIGUO = "";      // p. ej. "nodo-c3-01"
+const char* ID_PIR_ANTIGUO  = "";      // p. ej. "pir-sala-01"
+const char* ZONA            = "";      // opcional: lugar del nodo (ej. "sala")
 
 // Contactos magneticos (MC-38). Cada uno va entre su pin y GND, con pull-up
-// interno. Para agregar otro, anade una linea con un identificador unico y un
-// pin libre. Si es puerta o ventana se elige despues en la aplicacion.
+// interno. Para agregar otro basta con anadir su pin.
+// "idAntiguo" es opcional (""): para conservar un sensor ya registrado.
 struct ContactoCfg {
-  const char* id;
-  const char* zona;
   int pin;
+  const char* idAntiguo;
 };
 const ContactoCfg CONTACTOS[] = {
-  { "sensor-puerta-01",  "entrada", 4 },
-  { "sensor-ventana-01", "sala",    3 },
+  { 4, "" },     // p. ej. { 4, "sensor-puerta-01" } para conservar el historial
+  { 3, "" },
 };
 const int NUM_CONTACTOS = sizeof(CONTACTOS) / sizeof(CONTACTOS[0]);
 const int MAX_CONTACTOS = 6;
@@ -103,6 +109,11 @@ struct __attribute__((packed)) PaqueteSensor {
 
 // ===================== Estado interno =====================
 
+// Identificadores resultantes (se arman en setup)
+char NODO_ID[16];
+char ID_PIR[24];
+char contactoId[MAX_CONTACTOS][24];
+
 int  contactoEstable[MAX_CONTACTOS];
 int  contactoPrevio[MAX_CONTACTOS];
 unsigned long tCambioContacto[MAX_CONTACTOS];
@@ -130,6 +141,22 @@ PaqueteSensor cola[CAP_COLA];
 int colaTam = 0;
 
 void IRAM_ATTR alDetectarPir() { pirPulso = true; }
+
+// Arma los identificadores a partir de la MAC del chip
+void armarIdentificadores() {
+  uint8_t mac[6];
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);
+  char corto[8];
+  snprintf(corto, sizeof(corto), "%02x%02x%02x", mac[3], mac[4], mac[5]);
+  if (NODO_ID_ANTIGUO[0]) snprintf(NODO_ID, sizeof(NODO_ID), "%s", NODO_ID_ANTIGUO);
+  else snprintf(NODO_ID, sizeof(NODO_ID), "c3-%s", corto);
+  if (ID_PIR_ANTIGUO[0]) snprintf(ID_PIR, sizeof(ID_PIR), "%s", ID_PIR_ANTIGUO);
+  else snprintf(ID_PIR, sizeof(ID_PIR), "%s-pir", NODO_ID);
+  for (int i = 0; i < NUM_CONTACTOS && i < MAX_CONTACTOS; i++) {
+    if (CONTACTOS[i].idAntiguo[0]) snprintf(contactoId[i], sizeof(contactoId[i]), "%s", CONTACTOS[i].idAntiguo);
+    else snprintf(contactoId[i], sizeof(contactoId[i]), "%s-gpio%d", NODO_ID, CONTACTOS[i].pin);
+  }
+}
 
 // Lee la MAC directo del chip. WiFi.macAddress() puede devolver ceros si se
 // llama antes de que el Wi-Fi termine de arrancar.
@@ -289,13 +316,14 @@ void setup() {
   }
 
   secuencia = esp_random();   // evita repetir numeros tras un reinicio
+  armarIdentificadores();
 
   Serial.println();
   Serial.println("==========================================");
   Serial.println(" Nodo periferico ESP32-C3");
   Serial.print(" Nodo: "); Serial.println(NODO_ID);
   for (int i = 0; i < NUM_CONTACTOS && i < MAX_CONTACTOS; i++) {
-    Serial.print(" Contacto "); Serial.print(CONTACTOS[i].id);
+    Serial.print(" Contacto "); Serial.print(contactoId[i]);
     Serial.print(": GPIO "); Serial.println(CONTACTOS[i].pin);
   }
   Serial.print(" PIR "); Serial.print(ID_PIR); Serial.print(": GPIO "); Serial.println(PIN_PIR);
@@ -327,10 +355,10 @@ void loop() {
       contactoEstable[i] = lectura;
       int valor = (lectura == HIGH) ? 1 : 0;   // abierto = 1
       Serial.print("[Contacto] ");
-      Serial.print(CONTACTOS[i].id);
+      Serial.print(contactoId[i]);
       Serial.println(valor ? " ABIERTO" : " CERRADO");
       PaqueteSensor p;
-      llenarPaquete(p, TIPO_EVENTO, CONTACTOS[i].id, "estado_puerta", CONTACTOS[i].zona, valor);
+      llenarPaquete(p, TIPO_EVENTO, contactoId[i], "estado_puerta", ZONA, valor);
       encolar(p);
     }
   }
@@ -382,7 +410,7 @@ void loop() {
     tUltimoLatido = ahora ? ahora : 1;
     PaqueteSensor p;
     for (int i = 0; i < NUM_CONTACTOS && i < MAX_CONTACTOS; i++) {
-      llenarPaquete(p, TIPO_ESTADO, CONTACTOS[i].id, "estado_puerta", CONTACTOS[i].zona,
+      llenarPaquete(p, TIPO_ESTADO, contactoId[i], "estado_puerta", ZONA,
                     contactoEstable[i] == HIGH ? 1 : 0);
       encolar(p);
     }

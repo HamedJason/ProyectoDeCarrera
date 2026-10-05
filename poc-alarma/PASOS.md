@@ -537,3 +537,21 @@ git pull
 cd deploy
 docker compose up -d --build
 ```
+
+## Cuentas, varias viviendas y camara
+
+1. Redespliega el backend (`docker compose up -d --build`). El esquema se actualiza solo.
+2. Abre la app y crea la primera cuenta: hereda `casa-001`. Despues el registro se cierra;
+   para sumar personas usa Ajustes > Vivienda > Administrar > "Crear codigo de invitacion".
+3. En Administrar > Dispositivos pulsa "Generar token nuevo" (empieza con `hv_`, se muestra
+   una sola vez) y pegalo en `DEVICE_TOKEN` del concentrador y de la camara.
+4. Sensores automaticos: el nodo C3 se identifica con su MAC (`c3-xxxxxx`). Al encenderlo
+   aparece en la app con la etiqueta "Nuevo"; al ponerle nombre queda confirmado.
+5. Camara (`firmware/camara_ov5640`): elige tu placa con `#define BOARD_...`, activa PSRAM,
+   pon Wi-Fi, URL y el mismo token. Pregunta al servidor con una peticion larga de 20 s.
+6. Buzzer: activo, entre GPIO 4 y GND (el LED integrado en GPIO 2 lo refleja).
+
+Dimensionamiento del VPS (2 vCore, 4 GB, 40 GB NVMe, sin limite de trafico): el cuello
+de botella es el disco, no la red. Por eso solo se guardan fotos (~100-300 KB), con tope de
+14 dias, 300 MB por vivienda y 1.5 GB total; la vista en vivo (~1.6 Mbit/s) se limita a
+5 min por sesion y 60 min por dia, y el servidor solo retransmite el ultimo cuadro.
