@@ -75,8 +75,8 @@ ProyectoDeCarrera/
 │   ├── Caddyfile                          Dominio y HTTPS automático
 │   └── .env.example                       Plantilla de variables del despliegue
 ├── frontend/App.js                        Base inicial del frontend
-├── docs/                                  Diagramas de conexión, de flujo y de la base de datos
-│   └── talleres/                          Documentos de los talleres 4, 5, 6 y 7 (Word)
+├── docs/                                  Talleres 1 a 7 en PDF y, del 4 al 7, también en Word
+│   └── diagramas/                         Diagramas de conexión, de flujo y de la base de datos, con sus scripts
 └── pruebas/                               Simulador y scripts de prueba
 ```
 
