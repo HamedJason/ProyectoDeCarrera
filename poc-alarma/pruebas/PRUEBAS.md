@@ -62,3 +62,10 @@ Push ID recibido en un telefono C ms despues de salir del servidor (1/N).
   app instalada (Android) o revisa que la PWA este instalada en la pantalla de inicio (iPhone).
 - **Falta la linea C**: el telefono nunca confirmo; el aviso no llego o el service worker no se actualizo
   (cierra y reabre la app una vez tras actualizar).
+
+## 5. Pruebas de las funciones opcionales
+
+- **Historial desplegable:** con mas de 5 eventos aparece "Ver todo el historial (N)"; despliega, recarga la pagina (debe seguir desplegado) y vuelve a recoger.
+- **Notificacion con foto:** con la casa armada y la camara encendida, abre una puerta. Deben llegar dos avisos: el de alarma (rapido) y, unos segundos despues, "ALARMA: foto de la camara" con la imagen (Android/escritorio). La URL de la foto sin firma devuelve 401; con firma expirada tambien.
+- **HTTPS:** pon `USAR_HTTPS = true`; el Serial debe mostrar la hora sincronizada y los envios con codigo 200. Si sale error de certificado, revisa la hora (NTP) y `raiz_tls.h`. Compara el tiempo con `medir_tiempos.js` en HTTP y HTTPS.
+- **Cifrado ESP-NOW:** con `USAR_CIFRADO = true` en ambos y la MAC en `MACS_NODOS`, los eventos siguen llegando. Prueba negativa: quita la MAC del C3 de la lista; el receptor ya no debe mostrar sus eventos.

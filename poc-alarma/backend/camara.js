@@ -24,6 +24,7 @@
  *   multipart, para que el ESP32 pueda enviarlos con un POST sencillo.
  */
 
+const crypto = require('crypto');
 const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
@@ -51,6 +52,29 @@ const ESPERA_MAX_S = 25;
 
 let notificarFn = null;
 let registrarAccionFn = null;
+let notificarFotoFn = null;
+
+/*
+ * Enlaces firmados para mostrar una foto dentro de una notificacion push. El
+ * sistema operativo descarga la imagen sin sesion, asi que el enlace lleva una
+ * firma (HMAC) con caducidad corta y solo sirve para esa foto. El secreto se
+ * genera al arrancar: tras un reinicio los enlaces pendientes dejan de valer,
+ * lo cual es aceptable porque duran minutos.
+ */
+const SECRETO_FIRMA = crypto.randomBytes(32);
+const FIRMA_TTL_S = 15 * 60;
+function firmarFoto(id) {
+  const exp = Math.floor(Date.now() / 1000) + FIRMA_TTL_S;
+  const sig = crypto.createHmac('sha256', SECRETO_FIRMA).update(`${id}.${exp}`).digest('base64url');
+  return `${exp}.${sig}`;
+}
+function firmaValida(id, t) {
+  const [exp, sig] = String(t || '').split('.');
+  if (!exp || !sig || Number(exp) < Date.now() / 1000) return false;
+  const esperada = crypto.createHmac('sha256', SECRETO_FIRMA).update(`${id}.${exp}`).digest('base64url');
+  const a = Buffer.from(sig), b = Buffer.from(esperada);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 
 // ===================== Estado en memoria =====================
 
@@ -259,6 +283,7 @@ async function iniciar() {
 function montarRutas(app, ganchos = {}) {
   notificarFn = ganchos.notificar;
   registrarAccionFn = ganchos.registrarAccion;
+  notificarFotoFn = ganchos.notificarFoto;
 
   const cuerpoCrudo = (limite) => express.raw({ type: ['image/jpeg', 'application/octet-stream'], limit: limite });
 
@@ -328,7 +353,7 @@ function montarRutas(app, ganchos = {}) {
 
     try {
       const t = await pool.query(
-        `SELECT id, motivo, sensor_id, cantidad, tomadas FROM tareas_camara
+        `SELECT id, motivo, sensor_id, cantidad, tomadas, usuario FROM tareas_camara
           WHERE id = $1 AND vivienda_id = $2 AND tipo = 'foto' AND terminada_en IS NULL`, [tareaId, viviendaId]);
       if (!t.rowCount) return res.status(409).json({ ok: false, mensaje: 'La tarea no existe o ya termino.', restantes: 0 });
       const tarea = t.rows[0];
@@ -354,6 +379,12 @@ function montarRutas(app, ganchos = {}) {
       } catch (e) {
         await pool.query('DELETE FROM fotos WHERE id = $1', [id]);
         throw e;
+      }
+
+      // La primera foto de una alarma se manda en una notificacion, sin esperar
+      // el resto de la rafaga. Si falla, no afecta a la foto ya guardada.
+      if (tarea.usuario === 'alarma' && tarea.tomadas === 0 && notificarFotoFn) {
+        Promise.resolve(notificarFotoFn(viviendaId, id, firmarFoto(id))).catch((e) => console.error('Push con foto:', e.message));
       }
 
       const tomadas = tarea.tomadas + 1;
@@ -449,9 +480,10 @@ function montarRutas(app, ganchos = {}) {
     try {
       const r = await pool.query('SELECT vivienda_id FROM fotos WHERE id = $1', [id]);
       if (!r.rowCount) return res.status(404).json({ ok: false, mensaje: 'Foto no encontrada.' });
-      if (!(await exigirMiembro(req, res, r.rows[0].vivienda_id))) return;
+      const firmada = req.query.t && firmaValida(id, req.query.t);
+      if (!firmada && !(await exigirMiembro(req, res, r.rows[0].vivienda_id))) return;
       res.setHeader('Content-Type', 'image/jpeg');
-      res.setHeader('Cache-Control', 'private, max-age=86400, immutable');
+      res.setHeader('Cache-Control', firmada ? 'private, max-age=600' : 'private, max-age=86400, immutable');
       fs.createReadStream(rutaFoto(id))
         .on('error', () => { if (!res.headersSent) res.status(404).json({ ok: false, mensaje: 'El archivo ya no existe.' }); else res.end(); })
         .pipe(res);
@@ -533,4 +565,4 @@ function montarRutas(app, ganchos = {}) {
   });
 }
 
-module.exports = { montarRutas, iniciar, solicitarFotoAlarma, borrarFotosVivienda };
+module.exports = { montarRutas, iniciar, solicitarFotoAlarma, borrarFotosVivienda, firmarFoto, firmaValida };

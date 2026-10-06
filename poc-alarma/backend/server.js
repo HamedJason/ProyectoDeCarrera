@@ -580,7 +580,7 @@ function recordarEnvio(id, viviendaId, destinos) {
   }
 }
 
-async function notificarPush(viviendaId, titulo, mensaje, etiqueta) {
+async function notificarPush(viviendaId, titulo, mensaje, etiqueta, extra = {}) {
   if (!pushListo) return;
   // Solo reciben el aviso quienes siguen siendo miembros (o dispositivos
   // suscritos antes de que existieran las cuentas)
@@ -592,7 +592,7 @@ async function notificarPush(viviendaId, titulo, mensaje, etiqueta) {
   const v = await pool.query('SELECT nombre FROM viviendas WHERE id = $1', [viviendaId]);
   if (v.rowCount) mensaje = `${mensaje} (${v.rows[0].nombre})`;
   const idAviso = crypto.randomBytes(6).toString('hex');
-  const carga = { titulo, cuerpo: mensaje, etiqueta: etiqueta || 'alarma', url: '/', id: idAviso };
+  const carga = { titulo, cuerpo: mensaje, etiqueta: etiqueta || 'alarma', url: '/', id: idAviso, ...extra };
   recordarEnvio(idAviso, viviendaId, r.rows.length);
   const t0 = Date.now();
   const resultados = await Promise.all(r.rows.map((s) => enviarPush(s, carga)));
@@ -1127,7 +1127,15 @@ auth.montarRutas(app, {
     }
   }
 });
-camara.montarRutas(app, { notificar, registrarAccion });
+// Segundo aviso de una alarma: la misma notificacion (misma etiqueta) se
+// actualiza con la foto de la camara. En iPhone la imagen no se muestra en la
+// notificacion, pero el texto y el enlace a la app si llegan.
+function notificarFoto(viviendaId, fotoId, firma) {
+  return notificarPush(viviendaId, 'ALARMA: foto de la camara', 'La camara tomo una foto del momento de la alarma.', 'alarma',
+    { imagen: `/fotos/${fotoId}/imagen?t=${firma}` });
+}
+
+camara.montarRutas(app, { notificar, registrarAccion, notificarFoto });
 
 // ===================== Frontend =====================
 

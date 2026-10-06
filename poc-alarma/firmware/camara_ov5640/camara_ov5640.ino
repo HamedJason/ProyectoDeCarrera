@@ -50,6 +50,9 @@
 
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
+#include <time.h>
+#include "raiz_tls.h"
 #include <ArduinoJson.h>
 #include "esp_camera.h"
 
@@ -181,6 +184,41 @@ const int CUADROS_DESCARTADOS = 2;                    // deja que la exposicion 
 // ===================== Estado =====================
 
 WiFiClient clienteRed;
+
+// ===================== HTTPS opcional =====================
+/*
+ * Por omision el firmware habla HTTP plano con el puerto alterno del servidor.
+ * Con USAR_HTTPS = true usa HTTPS contra el dominio que ya tiene certificado, y
+ * BACKEND_BASE debe empezar con "https://" (sin puerto alterno). El token del
+ * dispositivo deja de viajar en claro y se valida la identidad del servidor con
+ * las raices de raiz_tls.h.
+ *
+ * Costos a tener en cuenta:
+ *   - El ESP32 no tiene reloj: necesita la hora (NTP) para validar el
+ *     certificado, asi que no envia nada hasta obtenerla. La alarma local no
+ *     depende de esto.
+ *   - El primer envio tras conectar tarda 1-3 s por el saludo TLS; los
+ *     siguientes reutilizan la conexion.
+ * HTTPS_SIN_VERIFICAR cifra pero NO comprueba al servidor. Solo para diagnostico.
+ */
+const bool USAR_HTTPS = false;
+const bool HTTPS_SIN_VERIFICAR = false;
+
+WiFiClientSecure clienteTls;
+bool tlsConfigurado = false;
+
+bool hayHora() { return time(nullptr) > 1700000000; }
+bool redLista() { return WiFi.status() == WL_CONNECTED && (!USAR_HTTPS || hayHora()); }
+void sincronizarHora() { if (USAR_HTTPS) configTime(0, 0, "pool.ntp.org", "time.google.com"); }
+WiFiClient& clienteBackend() {
+  if (!USAR_HTTPS) return clienteRed;
+  if (!tlsConfigurado) {
+    if (HTTPS_SIN_VERIFICAR) clienteTls.setInsecure(); else clienteTls.setCACert(RAIZ_TLS);
+    tlsConfigurado = true;
+  }
+  return clienteTls;
+}
+
 bool camaraLista = false;
 unsigned long tSinWiFi = 0;
 int fallosConsecutivos = 0;
@@ -254,6 +292,7 @@ void atenderWiFi() {
     if (tSinWiFi != 0) {
       Serial.print("[WiFi] Reconectado. IP: ");
       Serial.println(WiFi.localIP());
+      sincronizarHora();
     }
     tSinWiFi = 0;
     return;
@@ -270,6 +309,7 @@ void atenderWiFi() {
     Serial.print("[WiFi] Conectado. IP: ");
     Serial.println(WiFi.localIP());
     tSinWiFi = 0;
+    sincronizarHora();
   } else if (millis() - tSinWiFi > REINICIO_SIN_WIFI_MS) {
     Serial.println("[WiFi] Demasiado tiempo sin red. Reiniciando.");
     ESP.restart();
@@ -279,7 +319,7 @@ void atenderWiFi() {
 void prepararPeticion(HTTPClient& http, const String& ruta, unsigned long timeoutMs, const char* tipo) {
   http.setTimeout(timeoutMs);
   http.setReuse(true);
-  http.begin(clienteRed, String(BACKEND_BASE) + ruta);
+  http.begin(clienteBackend(), String(BACKEND_BASE) + ruta);
   http.addHeader("X-Device-Token", DEVICE_TOKEN);
   if (tipo) http.addHeader("Content-Type", tipo);
 }
@@ -410,7 +450,7 @@ void loop() {
   }
 
   atenderWiFi();
-  if (WiFi.status() != WL_CONNECTED) return;
+  if (!redLista()) { delay(500); return; }   // sin Wi-Fi, o sin hora para validar HTTPS
 
   if (consultarTarea()) {
     fallosConsecutivos = 0;

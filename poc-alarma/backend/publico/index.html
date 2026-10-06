@@ -435,6 +435,10 @@
   .hito .quien { font-weight: 600; font-size: 16px; }
   .hito .cuando { font-size: 13px; color: var(--tinta-2); font-variant-numeric: tabular-nums; }
 
+  .historial-mas { display: flex; width: 100%; justify-content: center; margin-top: 8px; padding: 11px; font: inherit; font-weight: 700; font-size: 14px; color: var(--pino); background: transparent; border: 1.5px solid var(--linea); border-radius: 12px; cursor: pointer; }
+  .historial-mas:hover { background: var(--yeso); }
+  .historial-mas[hidden] { display: none; }
+
   .vacio, .cargando { color: var(--tinta-2); font-size: 15px; padding: 18px 2px; max-width: 36ch; }
 
   /* ---- Pruebas y pie ---- */
@@ -697,6 +701,7 @@
 
     <h2 style="margin-top:34px">Historial</h2>
     <ol class="linea" id="lista"><li class="cargando">Consultando el servidor</li></ol>
+    <button class="historial-mas" id="historial-mas" onclick="alternarHistorial()" hidden></button>
 
     <div id="zona-pruebas">
       <button class="boton-texto" id="boton-limpiar" onclick="limpiarHistorial()">Borrar historial</button>
@@ -1292,16 +1297,37 @@ function construirHitos(mediciones, acciones) {
   return hitos.sort((x, y) => new Date(y.t) - new Date(x.t)).slice(0, 40);
 }
 
+// El historial se muestra resumido (los ultimos eventos) y se despliega bajo
+// demanda, para que la pantalla principal no se alargue con el uso.
+const HISTORIAL_RESUMEN = 5;
+let historialDesplegado = false;
+let ultimosHitos = [];
+try { historialDesplegado = localStorage.getItem('historial_desplegado') === '1'; } catch (_) {}
+
+function alternarHistorial() {
+  historialDesplegado = !historialDesplegado;
+  try { localStorage.setItem('historial_desplegado', historialDesplegado ? '1' : '0'); } catch (_) {}
+  pintarHistorial(ultimosHitos);
+  if (!historialDesplegado) $('lista').scrollIntoView({ block: 'nearest' });
+}
+
 function pintarHistorial(hitos) {
   const lista = $('lista');
+  const boton = $('historial-mas');
+  ultimosHitos = hitos;
 
   // Ausencia de datos, distinta de un error: se indica qué hacer
   if (!hitos.length) {
     lista.innerHTML = '<li class="vacio">Todavía no hay eventos. Abre una puerta o pasa frente a un sensor para generar el primero.</li>';
+    boton.hidden = true;
     return;
   }
 
-  lista.innerHTML = hitos.map(h =>
+  const visibles = historialDesplegado ? hitos : hitos.slice(0, HISTORIAL_RESUMEN);
+  boton.hidden = hitos.length <= HISTORIAL_RESUMEN;
+  boton.textContent = historialDesplegado ? 'Mostrar menos' : 'Ver todo el historial (' + hitos.length + ')';
+
+  lista.innerHTML = visibles.map(h =>
     '<li class="hito ' + h.clase + '">' +
       '<div class="riel"><span class="marca"></span></div>' +
       '<div class="texto">' +

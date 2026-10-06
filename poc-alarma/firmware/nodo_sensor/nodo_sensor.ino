@@ -39,6 +39,9 @@
 
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
+#include <time.h>
+#include "raiz_tls.h"
 #include <ArduinoJson.h>
 #include <esp_now.h>
 #include <esp_idf_version.h>
@@ -74,11 +77,27 @@ const char* NODO_ID     = "hub-01";   // nombre de este concentrador (sensores l
 const bool USAR_SENSORES_LOCALES = false;
 
 // Cifrado ESP-NOW (opcional). Debe coincidir con nodo_c3.ino. Si se activa,
-// hay que poner la MAC del C3 (la imprime en su Serial: "[MAC] Esta placa").
+// hay que listar la MAC de cada C3 (la imprime en su Serial: "[MAC] Esta placa").
+// Con USAR_CIFRADO el concentrador cifra con cada nodo de la lista (AES-CCM) y
+// descarta los paquetes de cualquier MAC que no este en ella.
+// IMPORTANTE: cambia las claves por otras de 16 caracteres; las de abajo estan
+// en el repositorio y por lo tanto no son secretas.
 const bool USAR_CIFRADO = false;
 const char* CLAVE_PMK = "pmk-uabc-2026-a1";   // exactamente 16 caracteres
 const char* CLAVE_LMK = "lmk-uabc-2026-b2";   // exactamente 16 caracteres
-uint8_t MAC_C3[6] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+// Una fila por nodo C3 (maximo 6; ESP-NOW permite 6 pares cifrados a la vez).
+const uint8_t MACS_NODOS[][6] = {
+  { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },   // C3 #1 (reemplazar por la MAC real)
+};
+const int NUM_NODOS_PERMITIDOS = sizeof(MACS_NODOS) / sizeof(MACS_NODOS[0]);
+
+bool macPermitida(const uint8_t* mac) {
+  if (!USAR_CIFRADO) return true;
+  for (int i = 0; i < NUM_NODOS_PERMITIDOS; i++) {
+    if (memcmp(MACS_NODOS[i], mac, 6) == 0) return true;
+  }
+  return false;
+}
 
 // ===================== Hardware =====================
 
@@ -255,6 +274,41 @@ int eventosEnBuffer = 0;
 
 WiFiClient clienteRed;
 
+// ===================== HTTPS opcional =====================
+/*
+ * Por omision el firmware habla HTTP plano con el puerto alterno del servidor.
+ * Con USAR_HTTPS = true usa HTTPS contra el dominio que ya tiene certificado, y
+ * BACKEND_BASE debe empezar con "https://" (sin puerto alterno). El token del
+ * dispositivo deja de viajar en claro y se valida la identidad del servidor con
+ * las raices de raiz_tls.h.
+ *
+ * Costos a tener en cuenta:
+ *   - El ESP32 no tiene reloj: necesita la hora (NTP) para validar el
+ *     certificado, asi que no envia nada hasta obtenerla. La alarma local no
+ *     depende de esto.
+ *   - El primer envio tras conectar tarda 1-3 s por el saludo TLS; los
+ *     siguientes reutilizan la conexion.
+ * HTTPS_SIN_VERIFICAR cifra pero NO comprueba al servidor. Solo para diagnostico.
+ */
+const bool USAR_HTTPS = false;
+const bool HTTPS_SIN_VERIFICAR = false;
+
+WiFiClientSecure clienteTls;
+bool tlsConfigurado = false;
+
+bool hayHora() { return time(nullptr) > 1700000000; }
+bool redLista() { return WiFi.status() == WL_CONNECTED && (!USAR_HTTPS || hayHora()); }
+void sincronizarHora() { if (USAR_HTTPS) configTime(0, 0, "pool.ntp.org", "time.google.com"); }
+WiFiClient& clienteBackend() {
+  if (!USAR_HTTPS) return clienteRed;
+  if (!tlsConfigurado) {
+    if (HTTPS_SIN_VERIFICAR) clienteTls.setInsecure(); else clienteTls.setCACert(RAIZ_TLS);
+    tlsConfigurado = true;
+  }
+  return clienteTls;
+}
+
+
 // Declaraciones adelantadas, porque se usan antes de su definicion
 bool enviarAlarma(bool activa, bool silenciosa);
 void sincronizarAlarma();
@@ -273,6 +327,7 @@ void atenderWiFi() {
       Serial.print("[WiFi] Conectado. IP: ");
       Serial.println(WiFi.localIP());
       wifiEstabaConectado = true;
+      sincronizarHora();
     }
     return;
   }
@@ -309,13 +364,14 @@ void iniciarWiFi() {
 bool enviarMedicion(unsigned long numeroRegistro, const char* variable,
                     const char* zona, const char* sensorId, const char* nodoId,
                     int valor, long &latenciaMs) {
-  if (WiFi.status() != WL_CONNECTED) return false;
+  if (!redLista()) return false;
 
   String url = String(BACKEND_BASE) + "/mediciones";
 
   HTTPClient http;
   http.setTimeout(TIMEOUT_HTTP_MS);
-  http.begin(clienteRed, url);
+  http.setReuse(USAR_HTTPS);
+  http.begin(clienteBackend(), url);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("X-Device-Token", DEVICE_TOKEN);
 
@@ -372,7 +428,7 @@ void guardarEnBuffer(unsigned long numeroRegistro, const char* variable,
 }
 
 void intentarVaciarBuffer() {
-  if (eventosEnBuffer == 0 || WiFi.status() != WL_CONNECTED) return;
+  if (eventosEnBuffer == 0 || !redLista()) return;
 
   Serial.println("[Buffer] Sincronizando eventos pendientes.");
   int enviados = 0;
@@ -458,7 +514,7 @@ void procesarEvento(const char* variable, const char* zona,
   bool enviado = false;
   long latencia = 0;
 
-  if (WiFi.status() != WL_CONNECTED) {
+  if (!redLista()) {
     Serial.println("   Sin conexion. El evento se conserva localmente.");
   } else {
     for (int intento = 1; intento <= MAX_REINTENTOS && !enviado; intento++) {
@@ -486,11 +542,12 @@ void procesarEvento(const char* variable, const char* zona,
  * Devuelve true si el backend respondio correctamente.
  */
 bool enviarAlarma(bool activa, bool silenciosa) {
-  if (WiFi.status() != WL_CONNECTED) return false;
+  if (!redLista()) return false;
 
   HTTPClient http;
   http.setTimeout(TIMEOUT_HTTP_MS);
-  http.begin(clienteRed, String(BACKEND_BASE) + "/alarma");
+  http.setReuse(USAR_HTTPS);
+  http.begin(clienteBackend(), String(BACKEND_BASE) + "/alarma");
   http.addHeader("Content-Type", "application/json");
   http.addHeader("X-Device-Token", DEVICE_TOKEN);
 
@@ -530,7 +587,7 @@ bool reportarAlarma(bool activa) {
  */
 void sincronizarAlarma() {
   if (alarmaReportadaActiva == sirenaPorAlarma) return;
-  if (WiFi.status() != WL_CONNECTED) return;
+  if (!redLista()) return;
   if (millis() - tUltimoReporteAlarma < INTERVALO_REPORTE_ALARMA_MS) return;
 
   tUltimoReporteAlarma = millis();
@@ -552,13 +609,14 @@ void apagarAlarmaLocal(const char* motivo) {
  * servidor si puede avisar en el momento en que ocurre el cambio.
  */
 void consultarEstado() {
-  if (WiFi.status() != WL_CONNECTED) return;
+  if (!redLista()) return;
 
   String url = String(BACKEND_BASE) + "/estado?vivienda_id=" + VIVIENDA_ID;
 
   HTTPClient http;
   http.setTimeout(TIMEOUT_HTTP_MS);
-  http.begin(clienteRed, url);
+  http.setReuse(USAR_HTTPS);
+  http.begin(clienteBackend(), url);
   http.addHeader("X-Device-Token", DEVICE_TOKEN);
   int codigo = http.GET();
 
@@ -627,6 +685,7 @@ volatile int rxLeer = 0;
 
 void guardarPaqueteRx(const uint8_t* mac, const uint8_t* datos, int largo, int rssi) {
   if (largo != (int)sizeof(PaqueteSensor)) return;
+  if (!macPermitida(mac)) return;   // con cifrado: solo los nodos de MACS_NODOS
   const PaqueteSensor* p = (const PaqueteSensor*)datos;
   if (p->magia[0] != 'S' || p->magia[1] != 'R' || p->version != 1) return;
   int sig = (rxEscribir + 1) % CAP_COLA_RX;
@@ -742,7 +801,7 @@ void recordarSensor(NodoVisto* n, const char* sensorId, const char* variable, co
 }
 
 void enviarLatidos() {
-  if (WiFi.status() != WL_CONNECTED) return;
+  if (!redLista()) return;
   tUltimoLatido = millis();
   latidoUrgente = false;
 
@@ -786,7 +845,8 @@ void enviarLatidos() {
 
   HTTPClient http;
   http.setTimeout(TIMEOUT_HTTP_MS);
-  http.begin(clienteRed, String(BACKEND_BASE) + "/nodos/latido");
+  http.setReuse(USAR_HTTPS);
+  http.begin(clienteBackend(), String(BACKEND_BASE) + "/nodos/latido");
   http.addHeader("Content-Type", "application/json");
   http.addHeader("X-Device-Token", DEVICE_TOKEN);
   int codigo = http.POST(cuerpo);
@@ -883,13 +943,15 @@ void iniciarEspNow() {
   }
   if (USAR_CIFRADO) {
     esp_now_set_pmk((const uint8_t*)CLAVE_PMK);
-    esp_now_peer_info_t par = {};
-    memcpy(par.peer_addr, MAC_C3, 6);
-    par.channel = 0;
-    par.ifidx = WIFI_IF_STA;
-    par.encrypt = true;
-    memcpy(par.lmk, CLAVE_LMK, 16);
-    if (esp_now_add_peer(&par) != ESP_OK) Serial.println("[ESP-NOW] No se pudo registrar el nodo C3 cifrado.");
+    for (int i = 0; i < NUM_NODOS_PERMITIDOS && i < 6; i++) {
+      esp_now_peer_info_t par = {};
+      memcpy(par.peer_addr, MACS_NODOS[i], 6);
+      par.channel = 0;
+      par.ifidx = WIFI_IF_STA;
+      par.encrypt = true;
+      memcpy(par.lmk, CLAVE_LMK, 16);
+      if (esp_now_add_peer(&par) != ESP_OK) Serial.printf("[ESP-NOW] No se pudo registrar el nodo %d cifrado.\n", i + 1);
+    }
   }
   esp_now_register_recv_cb(alRecibirEspNow);
   Serial.println("[ESP-NOW] Escuchando nodos perifericos.");
@@ -1020,7 +1082,7 @@ void loop() {
 
   // ---- Red y sincronizacion, sin detener el ciclo ----
   atenderWiFi();
-  if (WiFi.status() == WL_CONNECTED) intentarVaciarBuffer();
+  if (redLista()) intentarVaciarBuffer();
 
   // ---- Consulta periodica del estado de armado ----
   if (millis() - tUltimoEstado > INTERVALO_ESTADO_MS) {

@@ -445,7 +445,32 @@ El C3 busca solo el canal del receptor (el del router) y lo vuelve a buscar si c
 Con los mismos `sensorId` (`sensor-puerta-01`, `pir-sala-01`) la aplicación conserva los nombres y el historial.
 Si quieres que el receptor también lea sensores propios, pon `USAR_SENSORES_LOCALES = true`.
 
-**Cifrado (opcional).** Pon `USAR_CIFRADO = true` en los dos sketches con las mismas claves de 16 caracteres, y en el receptor escribe la MAC del C3 en `MAC_C3` (la imprime el C3 al arrancar).
+**Cifrado ESP-NOW (opcional, hasta 6 nodos).** ESP-NOW cifra con AES-CCM usando dos claves de 16 caracteres: la PMK (maestra) y la LMK (de cada par). Para activarlo:
+
+1. En `nodo_c3.ino` y en `nodo_sensor.ino` pon `USAR_CIFRADO = true`.
+2. **Cambia `CLAVE_PMK` y `CLAVE_LMK`** por 16 caracteres propios, iguales en el receptor y en todos los C3. Las que trae el código están en el repositorio y no son secretas.
+3. Arranca cada C3 y copia su línea `[MAC] Esta placa: ...`. En el receptor agrega una fila por C3 en `MACS_NODOS`, por ejemplo `{ 0x4C, 0x75, 0x25, 0xAB, 0xCD, 0xEF },`.
+4. Carga primero el receptor y luego los C3. El receptor descarta los paquetes de cualquier MAC que no esté en la lista.
+
+Limitaciones: el cifrado protege el contenido (nadie puede leer ni falsificar un evento sin la LMK), pero ESP-NOW no avisa al receptor si un paquete llegó cifrado o no, así que la lista de MACs por sí sola no frena a quien clone una MAC. Es un nivel razonable para la prueba de concepto; para producción se agregaría un contador firmado. Con el cifrado activo el límite es de 6 nodos C3 por receptor.
+
+### HTTPS en el hub y la cámara (opcional)
+
+Por defecto `USAR_HTTPS = false` y el firmware usa `http://sentinelhome.ddns.net:8080`. Para cifrar también el tramo Wi-Fi → internet:
+
+1. En el hub y en la cámara pon `USAR_HTTPS = true` y `BACKEND_BASE = "https://sentinelhome.ddns.net"` (el puerto 443 lo atiende Caddy con certificado Let's Encrypt).
+2. El firmware valida el certificado contra la raíz **ISRG Root X1** (y X2) incluida en `raiz_tls.h`. Si Let's Encrypt cambiara su cadena y el hub imprime errores de certificado, sustituye la raíz en ese archivo.
+3. El ESP32 no tiene reloj propio: necesita sincronizar la hora por NTP antes de validar el certificado (lo hace solo al conectarse al Wi-Fi; no envía nada hasta tener hora).
+4. Costo: el primer enlace tarda de 1 a 3 s y la conexión se reutiliza después. Si en las pruebas de latencia (`medir_tiempos.js`) el aviso se retrasa de forma apreciable, prueba primero con HTTP en el puerto 8080 para comparar y documenta ambos resultados.
+5. `HTTPS_SIN_VERIFICAR = true` cifra sin validar el certificado; úsalo solo para diagnosticar.
+
+### Notificación con foto
+
+Cuando la casa está armada y suena la alarma, el servidor manda el aviso de inmediato y, en cuanto la cámara sube la primera foto, un segundo aviso "ALARMA: foto de la cámara" con la imagen. La imagen va en una URL firmada que caduca a los 15 minutos, para que el teléfono pueda descargarla sin enviar la sesión. Android y escritorio muestran la foto dentro de la notificación; iPhone la ignora (al tocar la notificación se abre la app y ahí está en el historial de fotos).
+
+### Historial desplegable
+
+La pantalla principal muestra solo los 5 eventos más recientes. "Ver todo el historial (N)" despliega el resto y "Mostrar menos" lo vuelve a recoger; la app recuerda la última elección en ese navegador.
 
 ### Salida audible
 
@@ -537,23 +562,3 @@ git pull
 cd deploy
 docker compose up -d --build
 ```
-
-## Cuentas, varias viviendas y camara
-
-1. Redespliega en la VPS con `cd deploy && bash desplegar_vps.sh` (usa `docker-compose.yml` + `docker-compose.proxy.yml`, que conecta el backend a la red `ochil_edge` del proxy, y verifica el acceso publico). El esquema se actualiza solo.
-2. Abre la app y crea la primera cuenta: hereda `casa-001`. Despues el registro se cierra;
-   para sumar personas usa Ajustes > Vivienda > Administrar > "Crear codigo de invitacion".
-3. En Administrar > Dispositivos pulsa "Generar token nuevo" (empieza con `hv_`, se muestra
-   una sola vez) y pegalo en `DEVICE_TOKEN` del concentrador y de la camara.
-4. Sensores automaticos: el nodo C3 se identifica con su MAC (`c3-xxxxxx`). Al encenderlo
-   aparece en la app con la etiqueta "Nuevo"; al ponerle nombre queda confirmado.
-5. Camara (`firmware/camara_ov5640`): elige tu placa con `#define BOARD_...`, activa PSRAM,
-   pon Wi-Fi, URL y el mismo token. Pregunta al servidor con una peticion larga de 20 s.
-6. Buzzer: activo, entre GPIO 4 y GND (el LED integrado en GPIO 2 lo refleja).
-
-Dimensionamiento del VPS (2 vCore, 4 GB, 40 GB NVMe, sin limite de trafico): el cuello
-de botella es el disco, no la red. Por eso solo se guardan fotos (~100-300 KB), con tope de
-14 dias, 300 MB por vivienda y 1.5 GB total; la vista en vivo (~1.6 Mbit/s) se limita a
-5 min por sesion y 60 min por dia, y el servidor solo retransmite el ultimo cuadro.
-
-Pruebas sin hardware y con hardware: ver `pruebas/PRUEBAS.md` y el simulador `pruebas/simular.js`.

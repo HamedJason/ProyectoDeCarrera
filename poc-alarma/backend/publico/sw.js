@@ -20,6 +20,7 @@ self.addEventListener('push', (evento) => {
     vibrate: [300, 150, 300, 150, 300],
     data: { url: datos.url || '/' }
   };
+  if (datos.imagen) opciones.image = datos.imagen;   // foto de la camara (Android y escritorio)
   // iOS exige mostrar siempre una notificacion al recibir un push
   const tareas = [self.registration.showNotification(titulo, opciones)];
   // Avisa al servidor que el aviso llego, para medir la demora de entrega
