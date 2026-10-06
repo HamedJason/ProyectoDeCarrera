@@ -7,12 +7,13 @@ Cada flecha se ancla al borde exacto de la caja de origen y destino, para que
 ninguna termine en un punto vacio del lienzo.
 """
 
+import os
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyBboxPatch, FancyArrowPatch, Circle, Rectangle
 
-SALIDA = "/home/claude/poc-alarma/docs"
+SALIDA = os.path.dirname(os.path.abspath(__file__))
 
 
 def make_box(ax, x, y, w, h, text, fc="#EAF1FB", ec="#2C3E50", fs=9.5, bold=False):

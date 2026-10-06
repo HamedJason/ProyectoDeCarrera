@@ -85,12 +85,12 @@ Crea un repositorio vacío en <https://github.com/new>. No marques ninguna casil
 de inicialización. Luego, en PowerShell, dentro de la carpeta del proyecto:
 
 ```powershell
-cd C:\ruta\donde\tengas\poc-alarma
+cd C:\ruta\donde\tengas\ProyectoDeCarrera
 git init
 git add .
 git commit -m "Prueba de concepto: firmware, backend y despliegue"
 git branch -M main
-git remote add origin https://github.com/TU_USUARIO/poc-alarma.git
+git remote add origin https://github.com/TU_USUARIO/ProyectoDeCarrera.git
 git push -u origin main
 ```
 
@@ -101,8 +101,8 @@ abrir PowerShell.
 
 ```bash
 cd ~
-git clone https://github.com/TU_USUARIO/poc-alarma.git
-cd poc-alarma/deploy
+git clone https://github.com/TU_USUARIO/ProyectoDeCarrera.git
+cd ProyectoDeCarrera/deploy
 ```
 
 **Verificación:**
@@ -117,7 +117,7 @@ Debe listar `docker-compose.yml`, `.env.example` y `Caddyfile`, este último sin
 
 ## Paso 4 — Configurar y levantar 🐧
 
-Sigues dentro de `~/poc-alarma/deploy`.
+Sigues dentro de `~/ProyectoDeCarrera/deploy`.
 
 ```bash
 cp .env.example .env
@@ -515,7 +515,7 @@ La vivienda se crea sola la primera vez que se consulta, sin ningún alta previa
 ### Actualizar el despliegue tras estos cambios
 
 ```bash
-cd ~/poc-alarma
+cd ~/ProyectoDeCarrera
 git pull
 cd deploy
 docker compose up -d --build
@@ -545,7 +545,7 @@ conservan.
 ### Comandos útiles en el VPS 🐧
 
 ```bash
-cd ~/poc-alarma/deploy
+cd ~/ProyectoDeCarrera/deploy
 
 docker compose ps                    # estado de los servicios
 docker compose logs -f backend       # ver registros en vivo (Ctrl+C para salir)
@@ -557,7 +557,7 @@ docker compose up -d --build         # levantar de nuevo tras cambiar código
 Para actualizar el código después de un cambio:
 
 ```bash
-cd ~/poc-alarma
+cd ~/ProyectoDeCarrera
 git pull
 cd deploy
 docker compose up -d --build

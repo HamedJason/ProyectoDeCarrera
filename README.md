@@ -62,7 +62,7 @@ App móvil  ->  POST /comando  ->  Backend  ->  GET /comando (el ESP32 consulta)
 ## Estructura del repositorio
 
 ```
-poc-alarma/
+ProyectoDeCarrera/
 ├── firmware/nodo_sensor/nodo_sensor.ino   Firmware del ESP32
 ├── backend/
 │   ├── server.js                          API REST
@@ -75,7 +75,9 @@ poc-alarma/
 │   ├── Caddyfile                          Dominio y HTTPS automático
 │   └── .env.example                       Plantilla de variables del despliegue
 ├── frontend/App.js                        Base inicial del frontend
-└── docs/                                  Diagramas de conexión y de flujo
+├── docs/                                  Diagramas de conexión, de flujo y de la base de datos
+│   └── talleres/                          Documentos de los talleres 4, 5, 6 y 7 (Word)
+└── pruebas/                               Simulador y scripts de prueba
 ```
 
 ## Decisiones de la etapa
