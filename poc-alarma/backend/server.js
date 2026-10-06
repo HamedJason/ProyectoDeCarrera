@@ -16,6 +16,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const webpush = require('web-push');
+const crypto = require('crypto');
 const { pool, inicializarEsquema } = require('./db');
 const auth = require('./auth');
 const camara = require('./camara');
@@ -564,6 +565,21 @@ async function enviarPush(sub, carga) {
   }
 }
 
+/*
+ * Medicion de entrega. Cada aviso lleva un identificador; cuando el telefono lo
+ * recibe, su service worker avisa a POST /push/recibido y aqui se calcula el
+ * tiempo total (servidor -> Apple/Google -> telefono) con el reloj del servidor,
+ * sin depender de que los relojes coincidan. Sirve para saber si una demora
+ * esta en el hub, en el servidor o en la entrega al telefono.
+ */
+const pushEnviados = new Map();   // id -> { t0, vivienda, destinos }
+function recordarEnvio(id, viviendaId, destinos) {
+  pushEnviados.set(id, { t0: Date.now(), vivienda: viviendaId, destinos, recibidos: 0 });
+  for (const [k, v] of pushEnviados) {
+    if (Date.now() - v.t0 > 10 * 60 * 1000) pushEnviados.delete(k);
+  }
+}
+
 async function notificarPush(viviendaId, titulo, mensaje, etiqueta) {
   if (!pushListo) return;
   // Solo reciben el aviso quienes siguen siendo miembros (o dispositivos
@@ -575,13 +591,28 @@ async function notificarPush(viviendaId, titulo, mensaje, etiqueta) {
   if (r.rows.length === 0) return;
   const v = await pool.query('SELECT nombre FROM viviendas WHERE id = $1', [viviendaId]);
   if (v.rowCount) mensaje = `${mensaje} (${v.rows[0].nombre})`;
-  const carga = { titulo, cuerpo: mensaje, etiqueta: etiqueta || 'alarma', url: '/' };
+  const idAviso = crypto.randomBytes(6).toString('hex');
+  const carga = { titulo, cuerpo: mensaje, etiqueta: etiqueta || 'alarma', url: '/', id: idAviso };
+  recordarEnvio(idAviso, viviendaId, r.rows.length);
   const t0 = Date.now();
   const resultados = await Promise.all(r.rows.map((s) => enviarPush(s, carga)));
   // El tiempo que tarda el servicio de Apple o Google en aceptar el aviso ayuda
   // a saber si un retraso esta en este servidor o en la entrega al telefono.
-  console.log(`Push enviado a ${resultados.filter(Boolean).length} de ${r.rows.length} dispositivo(s) en ${Date.now() - t0} ms.`);
+  console.log(`Push ${idAviso} enviado a ${resultados.filter(Boolean).length} de ${r.rows.length} dispositivo(s); el servicio de push lo acepto en ${Date.now() - t0} ms.`);
 }
+
+// El service worker avisa aqui cuando el telefono recibe un aviso. No requiere
+// sesion (el worker puede correr con la app cerrada), pero solo acepta
+// identificadores que este servidor emitio hace menos de 10 minutos.
+app.post('/push/recibido', (req, res) => {
+  const id = String((req.body && req.body.id) || '');
+  const e = /^[0-9a-f]{12}$/.test(id) ? pushEnviados.get(id) : null;
+  if (e) {
+    e.recibidos++;
+    console.log(`Push ${id} recibido en un telefono ${Date.now() - e.t0} ms despues de salir del servidor (${e.recibidos}/${e.destinos}).`);
+  }
+  res.status(204).end();
+});
 
 /*
  * Envia un aviso por Web Push y, si NTFY_TOPIC esta definido, tambien por ntfy.
@@ -836,6 +867,12 @@ app.post('/alarma', async (req, res) => {
   const vivienda_id = disp.viviendaId;
 
   const { activa, nodo_id, motivo, zona, silenciosa, sensor_id } = req.body || {};
+  // El concentrador indica cuanto tardo en avisar desde que detecto el evento.
+  // Con esto se separa la demora del dispositivo de la del servidor o el telefono.
+  const retrasoHub = Number((req.body || {}).retraso_ms);
+  if (activa === true && Number.isFinite(retrasoHub)) {
+    console.log(`Alarma recibida: el concentrador tardo ${Math.round(retrasoHub)} ms en avisar desde que detecto el evento.`);
+  }
   if (typeof activa !== 'boolean') {
     return res.status(400).json({ ok: false, mensaje: 'El campo "activa" debe ser true o false.' });
   }

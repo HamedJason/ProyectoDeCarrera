@@ -1,0 +1,25 @@
+# Complemento para la VPS donde otro proyecto (ochil) ocupa los puertos 80 y 443.
+#
+# El proxy de ese proyecto atiende sentinelhome.ddns.net y llega al backend por
+# su nombre ("alarma_backend") dentro de Docker. Eso solo funciona si el backend
+# esta en la misma red que el proxy, que es "ochil_edge". Este archivo lo conecta
+# a esa red sin tocar el compose principal ni el otro proyecto.
+#
+# Se usa SIEMPRE junto con el compose principal:
+#   docker compose -f docker-compose.yml -f docker-compose.proxy.yml up -d --build
+# o con el script desplegar_vps.sh, que ademas verifica el resultado.
+#
+# Si cambia el nombre de la red del proxy, se averigua con:
+#   docker inspect ochil-proxy-1 --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}'
+
+services:
+  backend:
+    networks:
+      alarma: {}
+      ochil_edge:
+        aliases:
+          - alarma_backend
+
+networks:
+  ochil_edge:
+    external: true

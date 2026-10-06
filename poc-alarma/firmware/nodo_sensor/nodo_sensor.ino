@@ -236,6 +236,7 @@ char zonaAlarma[20]   = "";
 char sensorAlarma[24] = "";
 char nodoAlarma[16]   = "";           // nodo que reporto el sensor que disparo           // sensor que disparo, para resaltarlo en la app
 unsigned long tUltimoReporteAlarma = 0;
+unsigned long tDisparoAlarma = 0;     // cuando se detecto el evento, para medir cuanto tarda en avisar
 
 bool wifiEstabaConectado = false;
 unsigned long tUltimoIntentoWiFi = 0;
@@ -256,6 +257,7 @@ WiFiClient clienteRed;
 
 // Declaraciones adelantadas, porque se usan antes de su definicion
 bool enviarAlarma(bool activa, bool silenciosa);
+void sincronizarAlarma();
 void iniciarEspNow();
 
 // ===================== Wi-Fi no bloqueante =====================
@@ -294,6 +296,9 @@ void iniciarWiFi() {
   Serial.print("[WiFi] Iniciando conexion a ");
   Serial.println(WIFI_SSID);
   WiFi.mode(WIFI_STA);
+  // Sin ahorro de energia del modem: con el ahorro activo el router entrega los
+  // paquetes por lotes y cada peticion puede tardar 100-300 ms mas.
+  WiFi.setSleep(false);
   iniciarEspNow();
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   tUltimoIntentoWiFi = millis();
@@ -425,6 +430,7 @@ void procesarEvento(const char* variable, const char* zona,
       strncpy(nodoAlarma, nodoId, sizeof(nodoAlarma) - 1);       nodoAlarma[sizeof(nodoAlarma) - 1] = '\0';
       // Un solo intento. El evento ya queda registrado como medicion, y este
       // aviso solo sirve para la notificacion.
+      tDisparoAlarma = millis();
       enviarAlarma(true, true);
     } else {
       Serial.println("   ALARMA. Se activa la salida audible.");
@@ -439,6 +445,11 @@ void procesarEvento(const char* variable, const char* zona,
       strncpy(nodoAlarma, nodoId, sizeof(nodoAlarma) - 1);       nodoAlarma[sizeof(nodoAlarma) - 1] = '\0';
       sirenaPorAlarma = true;
       tInicioSirena = millis();
+      tDisparoAlarma = tInicioSirena;
+      // El aviso de alarma sale ANTES que el registro de la medicion. Antes iba
+      // despues, y si el servidor tardaba (reintentos de hasta 5 s cada uno) la
+      // notificacion se retrasaba por algo que no es urgente.
+      sincronizarAlarma();
     }
   } else if (esAlarma) {
     Serial.println("   Sistema desarmado. Solo se registra el evento.");
@@ -492,6 +503,7 @@ bool enviarAlarma(bool activa, bool silenciosa) {
     doc["zona"]      = zonaAlarma;
     doc["sensor_id"] = sensorAlarma;
     doc["silenciosa"] = silenciosa;
+    if (tDisparoAlarma) doc["retraso_ms"] = (unsigned long)(millis() - tDisparoAlarma);
   }
   String cuerpo;
   serializeJson(doc, cuerpo);

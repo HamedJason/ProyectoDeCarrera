@@ -21,7 +21,16 @@ self.addEventListener('push', (evento) => {
     data: { url: datos.url || '/' }
   };
   // iOS exige mostrar siempre una notificacion al recibir un push
-  evento.waitUntil(self.registration.showNotification(titulo, opciones));
+  const tareas = [self.registration.showNotification(titulo, opciones)];
+  // Avisa al servidor que el aviso llego, para medir la demora de entrega
+  if (datos.id) {
+    tareas.push(fetch('/push/recibido', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: datos.id })
+    }).catch(() => {}));
+  }
+  evento.waitUntil(Promise.all(tareas));
 });
 
 self.addEventListener('notificationclick', (evento) => {

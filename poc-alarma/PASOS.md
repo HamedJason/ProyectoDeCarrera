@@ -540,7 +540,7 @@ docker compose up -d --build
 
 ## Cuentas, varias viviendas y camara
 
-1. Redespliega el backend (`docker compose up -d --build`). El esquema se actualiza solo.
+1. Redespliega en la VPS con `cd deploy && bash desplegar_vps.sh` (usa `docker-compose.yml` + `docker-compose.proxy.yml`, que conecta el backend a la red `ochil_edge` del proxy, y verifica el acceso publico). El esquema se actualiza solo.
 2. Abre la app y crea la primera cuenta: hereda `casa-001`. Despues el registro se cierra;
    para sumar personas usa Ajustes > Vivienda > Administrar > "Crear codigo de invitacion".
 3. En Administrar > Dispositivos pulsa "Generar token nuevo" (empieza con `hv_`, se muestra
@@ -555,3 +555,5 @@ Dimensionamiento del VPS (2 vCore, 4 GB, 40 GB NVMe, sin limite de trafico): el 
 de botella es el disco, no la red. Por eso solo se guardan fotos (~100-300 KB), con tope de
 14 dias, 300 MB por vivienda y 1.5 GB total; la vista en vivo (~1.6 Mbit/s) se limita a
 5 min por sesion y 60 min por dia, y el servidor solo retransmite el ultimo cuadro.
+
+Pruebas sin hardware y con hardware: ver `pruebas/PRUEBAS.md` y el simulador `pruebas/simular.js`.
