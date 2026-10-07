@@ -91,14 +91,6 @@ const uint8_t MACS_NODOS[][6] = {
 };
 const int NUM_NODOS_PERMITIDOS = sizeof(MACS_NODOS) / sizeof(MACS_NODOS[0]);
 
-bool macPermitida(const uint8_t* mac) {
-  if (!USAR_CIFRADO) return true;
-  for (int i = 0; i < NUM_NODOS_PERMITIDOS; i++) {
-    if (memcmp(MACS_NODOS[i], mac, 6) == 0) return true;
-  }
-  return false;
-}
-
 // ===================== Hardware =====================
 
 // Salida de la sirena: buzzer ACTIVO (el que suena solo con voltaje) entre este
@@ -194,6 +186,16 @@ struct NodoVisto {
   SensorVisto sensores[MAX_SENSORES_NODO];
 };
 
+
+// Esta funcion va despues de los tipos (no antes) porque el Arduino IDE genera los
+// prototipos justo antes de la primera funcion del archivo y necesita conocerlos.
+bool macPermitida(const uint8_t* mac) {
+  if (!USAR_CIFRADO) return true;
+  for (int i = 0; i < NUM_NODOS_PERMITIDOS; i++) {
+    if (memcmp(MACS_NODOS[i], mac, 6) == 0) return true;
+  }
+  return false;
+}
 
 // ===================== Parametros de procesamiento =====================
 
