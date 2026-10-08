@@ -1,12 +1,6 @@
-# Sistema escalable de seguridad residencial — Prueba de concepto
+# Sentinel Home - Sistema escalable de seguridad residencial — Prueba de concepto
 
-Proyecto de Carrera, Ingeniería en Computación
-Universidad Autónoma de Baja California, Facultad de Ciencias Químicas e Ingeniería, Tijuana
-
-Este repositorio contiene la prueba de concepto reducida del Taller 5. Su objetivo
-no es entregar el sistema terminado, sino comprobar que la arquitectura elegida en
-el Taller 4 es viable, haciendo que un dato real recorra la cadena completa desde
-una entrada física hasta una pantalla en el teléfono.
+Jason A. Hamed Valdez - 1290897
 
 > **Para ponerlo en marcha, seguir [PASOS.md](PASOS.md).** Contiene el orden exacto
 > de despliegue, los comandos de verificación de cada etapa y una tabla de fallas
