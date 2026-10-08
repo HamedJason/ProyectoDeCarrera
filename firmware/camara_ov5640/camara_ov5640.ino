@@ -92,8 +92,21 @@ const framesize_t TAMANO_VIVO = FRAMESIZE_VGA;
 const int CALIDAD_VIVO = 16;
 const unsigned long VIVO_INTERVALO_MIN_MS = 150;   // ~6 cuadros por segundo como maximo
 
-const bool VOLTEAR_VERTICAL = false;     // pon true si la imagen sale de cabeza
+const bool VOLTEAR_VERTICAL = true;      // pon true si la imagen sale de cabeza
 const bool ESPEJO_HORIZONTAL = false;
+
+// Ajuste fino del sensor. Son los valores que mejor se vieron probando con el
+// ejemplo CameraWebServer de ESP32. Los de nitidez, ruido y ganancia son
+// aproximados; si abres http://IP-de-la-camara/status en esa pagina de prueba
+// puedes leer los numeros exactos y corregirlos aqui.
+const int XCLK_MHZ = 10;               // 10 MHz da menos ruido y calienta menos que 20
+const int AJ_BRILLO = 0;               // -3 a 3
+const int AJ_CONTRASTE = 0;            // -3 a 3
+const int AJ_SATURACION = 0;           // -4 a 4
+const int AJ_NITIDEZ = 0;              // -3 a 3
+const int AJ_REDUCCION_RUIDO = 4;      // 0 = automatico, hasta 8
+const int AJ_EXPOSICION = 0;           // -5 a 5, nivel de exposicion automatica
+const int AJ_GANANCIA_MAX = 225;       // tope de ganancia, 0 a 511
 
 // LED o flash. -1 si no hay. Se enciende solo durante una foto de alarma.
 const int PIN_FLASH = -1;
@@ -226,6 +239,27 @@ framesize_t tamanoActual = FRAMESIZE_INVALID;
 
 // ===================== Camara =====================
 
+// Aplica los ajustes de imagen del sensor (exposicion, balance de blancos, etc.).
+void aplicarAjustesSensor(sensor_t* s) {
+  s->set_brightness(s, AJ_BRILLO);
+  s->set_contrast(s, AJ_CONTRASTE);
+  s->set_saturation(s, AJ_SATURACION);
+  s->set_sharpness(s, AJ_NITIDEZ);
+  s->set_denoise(s, AJ_REDUCCION_RUIDO);
+  s->set_ae_level(s, AJ_EXPOSICION);
+  s->set_gainceiling(s, (gainceiling_t)AJ_GANANCIA_MAX);
+  s->set_whitebal(s, 1);        // balance de blancos automatico
+  s->set_awb_gain(s, 1);
+  s->set_exposure_ctrl(s, 1);   // exposicion automatica
+  s->set_aec2(s, 0);            // modo nocturno apagado
+  s->set_gain_ctrl(s, 1);
+  s->set_raw_gma(s, 1);
+  s->set_lenc(s, 1);            // correccion de lente
+  s->set_bpc(s, 1);
+  s->set_wpc(s, 1);
+  s->set_colorbar(s, 0);
+}
+
 bool iniciarCamara() {
   camera_config_t c = {};
   c.ledc_channel = LEDC_CHANNEL_0;
@@ -240,7 +274,7 @@ bool iniciarCamara() {
   c.pin_sccb_scl = SIOC_GPIO_NUM;
   c.pin_pwdn = PWDN_GPIO_NUM;
   c.pin_reset = RESET_GPIO_NUM;
-  c.xclk_freq_hz = 20000000;
+  c.xclk_freq_hz = XCLK_MHZ * 1000000;
   c.pixel_format = PIXFORMAT_JPEG;
   c.frame_size = TAMANO_FOTO;
   c.jpeg_quality = CALIDAD_FOTO;
@@ -265,6 +299,7 @@ bool iniciarCamara() {
                 s->id.PID == OV5640_PID ? "(OV5640)" : "(no es un OV5640)");
   s->set_vflip(s, VOLTEAR_VERTICAL ? 1 : 0);
   s->set_hmirror(s, ESPEJO_HORIZONTAL ? 1 : 0);
+  aplicarAjustesSensor(s);
   tamanoActual = TAMANO_FOTO;
   return true;
 }
