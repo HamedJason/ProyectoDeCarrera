@@ -1,45 +1,28 @@
 /*
  * Proyecto de Carrera - Sistema escalable de seguridad residencial
- * Nodo sensor sobre ESP32 DevKit
+ * Concentrador (ESP32 DevKit)
  *
- * Cadena demostrada por este firmware:
- *   entrada fisica -> procesamiento local -> Wi-Fi -> POST al backend
- *                                                  -> consulta de estado
- *                                                  -> salida audible
+ * Es la unica placa conectada al Wi-Fi y al backend. Recibe por ESP-NOW los
+ * eventos de los nodos C3 (nodo_c3.ino), decide si suena la sirena y avisa al
+ * servidor. La alarma funciona aunque no haya Internet.
  *
- * Este nodo es el RECEPTOR: la unica placa conectada al Wi-Fi y al backend.
- * Recibe por ESP-NOW los eventos de los nodos perifericos (nodo_c3.ino, un
- * ESP32-C3 con los sensores) y ejecuta con ellos toda la logica de alarma.
- * Tambien puede leer sensores propios si USAR_SENSORES_LOCALES es true.
+ * CONFIGURACION SIN RECOMPILAR
+ *   Abre el Monitor Serie a 115200 con "Nueva linea" y escribe los comandos.
+ *   Todo se guarda en la flash y sobrevive a reinicios:
+ *     wifi NOMBRE_DE_LA_RED
+ *     clave PASSWORD
+ *     token hv_...         (Ajustes > Vivienda > Administrar > Dispositivos)
+ *     servidor http://dominio:8080
+ *     emparejar            (abre 2 min para que los C3 se enlacen solos)
+ *   Escribe "ayuda" para ver el resto.
  *
- * Entradas soportadas (varias de cada una, se declaran en las tablas de abajo):
- *   - Contactos magneticos MC-38 en puertas o ventanas (contacto seco)
- *   - Sensores infrarrojos pasivos AM312 para movimiento
- *
- * El nodo no sabe si un contacto esta en una puerta o en una ventana: solo
- * reporta abierto/cerrado con un identificador. El residente decide el tipo y
- * el nombre desde la aplicacion, que registra cada sensor la primera vez que
- * reporta.
- *
- * El AM312 opera entre 2.7 y 12 V y entrega 3.3 V en su salida, por lo que se
- * conecta directamente al ESP32 sin divisor de voltaje. A diferencia del
- * HC-SR501 no tiene ajustes y su retardo interno es fijo, de unos 2 segundos.
- *
- * Flujo de la alarma:
- *   1. Un sensor dispara con el sistema armado y el modo silencioso apagado.
- *   2. La salida (LED o sirena) parpadea y el nodo avisa al backend (POST /alarma).
- *   3. La aplicacion muestra ALARMA ACTIVA con el boton "Apagar alarma".
- *   4. La alarma termina al apagarla desde la aplicacion, al desarmar el
- *      sistema o al cumplirse el tiempo maximo de sirena.
- *
- * Librerias necesarias (Gestor de librerias de Arduino IDE):
- *   - ArduinoJson (Benoit Blanchon), version 7.x
- * WiFi.h y HTTPClient.h vienen incluidas con el core de ESP32.
+ * Libreria necesaria: ArduinoJson (Benoit Blanchon) 7.x
  */
 
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
+#include <Preferences.h>
 #include <time.h>
 #include "raiz_tls.h"
 #include <ArduinoJson.h>
@@ -51,112 +34,73 @@
 #include <esp_system.h>
 #endif
 
-// ===================== Configuracion editable =====================
+// ===================== Valores por omision =====================
+// Se pueden cambiar por comando; aqui solo es lo que se usa si no hay nada guardado.
 
-const char* WIFI_SSID     = "NOMBRE_DE_TU_RED";
-const char* WIFI_PASSWORD = "PASSWORD_DE_TU_RED";
+const char* BACKEND_POR_DEFECTO  = "http://privadaochil.ddns.net:8080";
+const char* VIVIENDA_POR_DEFECTO = "casa-001";   // solo cuenta con el token global antiguo
+const char* NODO_ID = "hub-01";                  // nombre de este concentrador
 
-// URL del backend desplegado. Debe terminar sin diagonal final.
-const char* BACKEND_BASE  = "http://privadaochil.ddns.net:8080";
-
-// Token de ESTA vivienda. Se genera en la aplicacion: Ajustes > Vivienda >
-// Administrar > Dispositivos > "Generar token nuevo" (empieza con "hv_" y solo se
-// muestra una vez). El servidor deduce la vivienda a partir del token.
-// Compatibilidad: una vivienda que aun no tiene token propio acepta el
-// DEVICE_TOKEN global del archivo .env del servidor.
-const char* DEVICE_TOKEN  = "PEGA_AQUI_EL_TOKEN_hv_...";
-
-// Solo se usa con el token global antiguo; con un token por vivienda se ignora.
-const char* VIVIENDA_ID = "casa-001";
-const char* NODO_ID     = "hub-01";   // nombre de este concentrador (sensores locales)
-
-// ===================== Nodos perifericos (ESP-NOW) =====================
-
-// Si es true, este nodo tambien lee los sensores de las tablas de abajo. Con el
-// ESP32-C3 encargado de los sensores se deja en false.
+// Si es true lee los sensores de las tablas de abajo ademas de los C3
 const bool USAR_SENSORES_LOCALES = false;
 
-// Cifrado ESP-NOW (opcional). Debe coincidir con nodo_c3.ino. Si se activa,
-// hay que listar la MAC de cada C3 (la imprime en su Serial: "[MAC] Esta placa").
-// Con USAR_CIFRADO el concentrador cifra con cada nodo de la lista (AES-CCM) y
-// descarta los paquetes de cualquier MAC que no este en ella.
-// IMPORTANTE: cambia las claves por otras de 16 caracteres; las de abajo estan
-// en el repositorio y por lo tanto no son secretas.
+// Si es true, el servidor valida el certificado HTTPS. Pon false solo para
+// diagnostico: cifra pero no comprueba quien responde.
+const bool HTTPS_VERIFICAR = true;
+
+// Cifrado ESP-NOW opcional; debe coincidir con nodo_c3.ino. Las claves estan
+// en el repositorio, asi que cambialas por otras de 16 caracteres si lo activas.
 const bool USAR_CIFRADO = false;
-const char* CLAVE_PMK = "pmk-uabc-2026-a1";   // exactamente 16 caracteres
-const char* CLAVE_LMK = "lmk-uabc-2026-b2";   // exactamente 16 caracteres
-// Una fila por nodo C3 (maximo 6; ESP-NOW permite 6 pares cifrados a la vez).
-const uint8_t MACS_NODOS[][6] = {
-  { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },   // C3 #1 (reemplazar por la MAC real)
-};
-const int NUM_NODOS_PERMITIDOS = sizeof(MACS_NODOS) / sizeof(MACS_NODOS[0]);
+const char* CLAVE_PMK = "pmk-uabc-2026-a1";
+const char* CLAVE_LMK = "lmk-uabc-2026-b2";
 
 // ===================== Hardware =====================
 
-// Salida de la sirena: buzzer ACTIVO (el que suena solo con voltaje) entre este
-// pin y GND, o la entrada de un modulo relevador. Con un buzzer pasivo no
-// sonaria bien: necesitaria una señal de frecuencia (tone) en vez de HIGH/LOW.
-// El GPIO 4 es de los pines seguros; si activas USAR_SENSORES_LOCALES no lo
-// repitas en la tabla de contactos.
+// Sirena: buzzer activo o modulo relevador entre este pin y GND
 const int PIN_SALIDA = 4;
-// LED integrado: refleja la salida para ver el estado aunque no haya buzzer
 const int PIN_LED_ESTADO = 2;
 
-/*
- * Contactos magneticos MC-38. Un cable al pin y el otro a GND; el pull-up
- * interno hace el resto. Pines recomendados: 4, 16, 17, 21, 22, 23.
- * Evitar 0, 2, 5, 12, 15 (arranque) y 34-39 (no tienen pull-up interno).
- *
- * "sensorId" es el identificador que veran el backend y la aplicacion. No lo
- * cambies despues de registrarlo o se creara como un sensor nuevo.
- * "zona" es solo el lugar; el nombre y el tipo se ponen en la aplicacion.
- * Cada tabla debe tener al menos un sensor (un arreglo vacio no compila).
- */
+// Contactos MC-38: un cable al pin y otro a GND (pull-up interno).
+// Pines recomendados: 4, 16, 17, 21, 22, 23. Evitar 0, 2, 5, 12, 15 y 34-39.
 struct Contacto {
   const char* sensorId;
   const char* zona;
   int pin;
-  int estable;             // estado ya filtrado
+  int estable;             // lectura ya filtrada
   int previa;              // ultima lectura cruda
   unsigned long tCambio;
 };
 
 Contacto contactos[] = {
   { "sensor-puerta-01", "entrada", 4, HIGH, HIGH, 0 },
-  // { "contacto-02", "sala",     16, HIGH, HIGH, 0 },
-  // { "contacto-03", "cocina",   17, HIGH, HIGH, 0 },
-  // { "contacto-04", "recamara", 21, HIGH, HIGH, 0 },
 };
 const int NUM_CONTACTOS = USAR_SENSORES_LOCALES ? (int)(sizeof(contactos) / sizeof(contactos[0])) : 0;
 
-/*
- * Sensores de movimiento AM312. Alimentacion 3.3 V, GND y OUT al pin.
- * Pines recomendados: 18, 19, 25, 26, 27. El GPIO 5 NO sirve: es un pin de
- * arranque y da lecturas falsas.
- */
+// Sensores de movimiento AM312. Pines recomendados: 18, 19, 25, 26, 27.
+// El GPIO 5 no sirve: es de arranque y da lecturas falsas.
 struct Pir {
   const char* sensorId;
   const char* zona;
   int pin;
   volatile bool pulso;     // lo levanta la interrupcion
   unsigned long tUltimo;   // ultimo evento aceptado
-  int previa;              // lectura anterior, para detectar el flanco por sondeo
+  int previa;
 };
 
 Pir pirs[] = {
   { "pir-sala-01", "sala", 18, false, 0 },
-  // { "pir-02", "pasillo", 19, false, 0 },
 };
 const int NUM_PIRS = USAR_SENSORES_LOCALES ? (int)(sizeof(pirs) / sizeof(pirs[0])) : 0;
 
-// ===================== Tipos del protocolo ESP-NOW =====================
-// Se definen aqui, antes de cualquier funcion, porque el Arduino IDE genera los
-// prototipos de las funciones al inicio del archivo y necesita conocer estos tipos.
+// ===================== Protocolo ESP-NOW =====================
+// Igual que en nodo_c3.ino. Los tipos van antes de las funciones porque el
+// Arduino IDE genera los prototipos al inicio del archivo.
 
-// Debe ser IDENTICO en nodo_c3.ino
-const uint8_t TIPO_EVENTO = 1;
-const uint8_t TIPO_ESTADO = 2;
-const uint8_t TIPO_HOLA   = 3;
+const uint8_t TIPO_EVENTO    = 1;
+const uint8_t TIPO_ESTADO    = 2;
+const uint8_t TIPO_HOLA      = 3;   // prueba de canal
+const uint8_t TIPO_EMPAREJAR = 4;   // el C3 pide enlazarse (broadcast)
+const uint8_t TIPO_RESPUESTA = 5;   // el concentrador acepta (broadcast con la MAC del C3)
 
 struct __attribute__((packed)) PaqueteSensor {
   uint8_t  magia[2];
@@ -173,7 +117,6 @@ struct __attribute__((packed)) PaqueteSensor {
 struct OrigenRemoto { uint8_t mac[6]; uint32_t ultimaSecuencia; bool usado; };
 struct EstadoRemoto { char sensorId[24]; int valor; bool usado; };
 
-// Registro de nodos escuchados (para el latido). Va aqui por la misma razon.
 const int MAX_NODOS = 6;
 const int MAX_SENSORES_NODO = 6;
 struct SensorVisto { char sensorId[24]; char variable[16]; char zona[16]; };
@@ -186,81 +129,120 @@ struct NodoVisto {
   SensorVisto sensores[MAX_SENSORES_NODO];
 };
 
+const uint8_t MAC_BROADCAST[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
-// Esta funcion va despues de los tipos (no antes) porque el Arduino IDE genera los
-// prototipos justo antes de la primera funcion del archivo y necesita conocerlos.
-bool macPermitida(const uint8_t* mac) {
-  if (!USAR_CIFRADO) return true;
-  for (int i = 0; i < NUM_NODOS_PERMITIDOS; i++) {
-    if (memcmp(MACS_NODOS[i], mac, 6) == 0) return true;
+// ===================== Configuracion guardada =====================
+
+Preferences prefs;
+String cfgSsid, cfgClave, cfgToken, cfgServidor, cfgVivienda;
+
+// MACs de los C3 emparejados (se guardan en la flash)
+const int MAX_PAREADOS = 6;   // tambien es el maximo de pares cifrados de ESP-NOW
+uint8_t pareados[MAX_PAREADOS][6];
+int numPareados = 0;
+
+int indicePareado(const uint8_t* mac) {
+  for (int i = 0; i < numPareados; i++) {
+    if (memcmp(pareados[i], mac, 6) == 0) return i;
   }
-  return false;
+  return -1;
 }
 
-// ===================== Parametros de procesamiento =====================
+bool macPermitida(const uint8_t* mac) {
+  return indicePareado(mac) >= 0;
+}
 
-const unsigned long DEBOUNCE_MS   = 50;     // filtrado de rebote del contacto
-const unsigned long BLOQUEO_PIR_MS = 8000;  // espera minima entre eventos de movimiento
-// El AM312 necesita entre 30 y 60 s tras energizarse para estabilizarse. Durante
-// ese tiempo sus lecturas no son confiables y se ignoran.
-const unsigned long PIR_ESTABILIZACION_MS = 45000;
+String macATexto(const uint8_t* mac) {
+  char t[18];
+  snprintf(t, sizeof(t), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  return String(t);
+}
+
+void cargarConfig() {
+  prefs.begin("seguridad", false);
+  cfgSsid     = prefs.getString("ssid", "");
+  cfgClave    = prefs.getString("clave", "");
+  cfgToken    = prefs.getString("token", "");
+  cfgServidor = prefs.getString("servidor", BACKEND_POR_DEFECTO);
+  cfgVivienda = prefs.getString("vivienda", VIVIENDA_POR_DEFECTO);
+
+  size_t bytes = prefs.getBytesLength("nodos");
+  if (bytes > MAX_PAREADOS * 6) bytes = MAX_PAREADOS * 6;
+  if (bytes >= 6) {
+    prefs.getBytes("nodos", pareados, bytes);
+    numPareados = bytes / 6;
+  }
+}
+
+void guardarNodos() {
+  if (numPareados == 0) prefs.remove("nodos");
+  else prefs.putBytes("nodos", pareados, numPareados * 6);
+}
+
+// ===================== Parametros =====================
+
+const unsigned long DEBOUNCE_MS = 50;
+const unsigned long BLOQUEO_PIR_MS = 8000;           // espera minima entre eventos de movimiento
+const unsigned long PIR_ESTABILIZACION_MS = 45000;   // el AM312 tarda 30-60 s tras energizarse
 const unsigned long INTERVALO_ESTADO_MS = 2000;
 const unsigned long TIMEOUT_HTTP_MS = 5000;
 const unsigned long INTERVALO_RECONEXION_MS = 10000;
+const unsigned long DURACION_EMPAREJAR_MS = 120000;
 const int  MAX_REINTENTOS   = 3;
 const int  CAPACIDAD_BUFFER = 20;
 
-// Tiempo maximo que suena la alarma si nadie la apaga, en milisegundos
-const unsigned long DURACION_SIRENA_MS = 30000;
+const unsigned long DURACION_SIRENA_MS = 30000;   // tiempo maximo si nadie la apaga
 
-// La salida parpadea para simular el sonido de una sirena. Con un LED se ve
-// como encendido y apagado. Con un relevador y una sirena real conviene poner
-// SALIDA_INTERMITENTE en false para que suene de forma continua.
+// Con un LED o buzzer la salida parpadea; con sirena real en relevador, ponlo en false
 const bool SALIDA_INTERMITENTE = true;
 const unsigned long INTERVALO_PARPADEO_MS = 300;
 const unsigned long INTERVALO_REPORTE_ALARMA_MS = 1000;
 
 // ===================== Estado interno =====================
 
-bool pirListo = false;   // true cuando termino el tiempo de estabilizacion
+bool pirListo = false;
 
-// El AM312 mantiene su salida en alto solo unos 2 segundos. Si el programa esta
-// ocupado en una peticion HTTP (que puede tardar hasta 5 s con el servidor
-// caido), un sondeo podria perder el pulso por completo. Por eso el flanco de
-// subida se captura con una interrupcion, que no depende de lo que haga el ciclo.
-// Cada interrupcion recibe como argumento el indice de su sensor en "pirs".
+// El AM312 deja su salida en alto solo ~2 s, asi que el flanco se captura con
+// interrupcion para no perderlo mientras el ciclo espera una peticion HTTP.
 void IRAM_ATTR alDetectarPir(void* arg) {
   pirs[(int)(intptr_t)arg].pulso = true;
 }
 
 unsigned long tUltimoEstado = 0;
 unsigned long contadorRegistro = 0;
-
 unsigned long enviosExitosos = 0;
 unsigned long enviosFallidos = 0;
 
-// Estado recibido del backend
+// Estado que viene del backend
 bool sistemaArmado   = false;
 bool modoSilencioso  = false;
-bool salidaManual    = false;   // activacion directa desde la aplicacion
+bool salidaManual    = false;   // activacion directa desde la app
 
-// Sirena disparada por un evento de alarma
 bool sirenaPorAlarma = false;
 unsigned long tInicioSirena = 0;
 
-// Coordinacion con el backend. El nodo decide localmente para que la alarma
-// suene aun sin Internet, y despues informa lo ocurrido.
+// La alarma se decide localmente y despues se informa al backend
 bool alarmaReportadaActiva = false;   // ultimo valor que el backend conoce
-bool alarmaConfirmada = false;        // el backend ya vio esta alarma como activa
-char motivoAlarma[20] = "";           // variable que disparo la alarma, para el aviso
+bool alarmaConfirmada = false;        // el backend ya la vio activa
+char motivoAlarma[20] = "";
 char zonaAlarma[20]   = "";
 char sensorAlarma[24] = "";
-char nodoAlarma[16]   = "";           // nodo que reporto el sensor que disparo           // sensor que disparo, para resaltarlo en la app
+char nodoAlarma[16]   = "";
 unsigned long tUltimoReporteAlarma = 0;
-unsigned long tDisparoAlarma = 0;     // cuando se detecto el evento, para medir cuanto tarda en avisar
+unsigned long tDisparoAlarma = 0;     // para medir cuanto tarda en avisar
 
 bool wifiEstabaConectado = false;
 unsigned long tUltimoIntentoWiFi = 0;
+
+// Emparejamiento: la ventana la abre el comando "emparejar"
+volatile bool emparejando = false;
+unsigned long tFinEmparejar = 0;
+volatile bool nodoNuevo = false;     // la recepcion avisa al ciclo principal
+volatile bool nodosLlenos = false;
+char nombreNuevo[16] = "";
+uint8_t macNueva[6];
+volatile bool hayDesconocido = false;
+uint8_t macDesconocida[6];
 
 struct EventoPendiente {
   unsigned long numeroRegistro;
@@ -274,56 +256,56 @@ struct EventoPendiente {
 EventoPendiente bufferEventos[CAPACIDAD_BUFFER];
 int eventosEnBuffer = 0;
 
+// ===================== HTTP / HTTPS =====================
+// El esquema de la URL del servidor decide: http:// o https://
+
 WiFiClient clienteRed;
-
-// ===================== HTTPS opcional =====================
-/*
- * Por omision el firmware habla HTTP plano con el puerto alterno del servidor.
- * Con USAR_HTTPS = true usa HTTPS contra el dominio que ya tiene certificado, y
- * BACKEND_BASE debe empezar con "https://" (sin puerto alterno). El token del
- * dispositivo deja de viajar en claro y se valida la identidad del servidor con
- * las raices de raiz_tls.h.
- *
- * Costos a tener en cuenta:
- *   - El ESP32 no tiene reloj: necesita la hora (NTP) para validar el
- *     certificado, asi que no envia nada hasta obtenerla. La alarma local no
- *     depende de esto.
- *   - El primer envio tras conectar tarda 1-3 s por el saludo TLS; los
- *     siguientes reutilizan la conexion.
- * HTTPS_SIN_VERIFICAR cifra pero NO comprueba al servidor. Solo para diagnostico.
- */
-const bool USAR_HTTPS = false;
-const bool HTTPS_SIN_VERIFICAR = false;
-
 WiFiClientSecure clienteTls;
 bool tlsConfigurado = false;
 
+bool usaHttps() { return cfgServidor.startsWith("https://"); }
 bool hayHora() { return time(nullptr) > 1700000000; }
-bool redLista() { return WiFi.status() == WL_CONNECTED && (!USAR_HTTPS || hayHora()); }
-void sincronizarHora() { if (USAR_HTTPS) configTime(0, 0, "pool.ntp.org", "time.google.com"); }
+// Sin hora no se puede validar el certificado HTTPS
+bool redLista() {
+  return WiFi.status() == WL_CONNECTED && cfgToken.length() > 0 && (!usaHttps() || hayHora());
+}
+void sincronizarHora() { if (usaHttps()) configTime(0, 0, "pool.ntp.org", "time.google.com"); }
+
 WiFiClient& clienteBackend() {
-  if (!USAR_HTTPS) return clienteRed;
+  if (!usaHttps()) return clienteRed;
   if (!tlsConfigurado) {
-    if (HTTPS_SIN_VERIFICAR) clienteTls.setInsecure(); else clienteTls.setCACert(RAIZ_TLS);
+    if (HTTPS_VERIFICAR) clienteTls.setCACert(RAIZ_TLS); else clienteTls.setInsecure();
     tlsConfigurado = true;
   }
   return clienteTls;
 }
 
-
-// Declaraciones adelantadas, porque se usan antes de su definicion
 bool enviarAlarma(bool activa, bool silenciosa);
 void sincronizarAlarma();
 void iniciarEspNow();
+void registrarPares();
 
 // ===================== Wi-Fi no bloqueante =====================
+// Nunca detiene el ciclo: mientras espera la red, los sensores se siguen leyendo.
 
-/*
- * Nunca detiene el programa. Una version anterior esperaba la conexion dentro
- * de un ciclo que bloqueaba hasta quince segundos, y durante esa espera el
- * sensor no se leia, justo cuando mas importa que siga funcionando.
- */
+void conectarWiFi() {
+  if (cfgSsid.length() == 0) return;
+  WiFi.begin(cfgSsid.c_str(), cfgClave.length() ? cfgClave.c_str() : nullptr);
+  tUltimoIntentoWiFi = millis();
+}
+
+void reconectarWiFi() {
+  if (cfgSsid.length() == 0) return;
+  Serial.print("[WiFi] Conectando a ");
+  Serial.println(cfgSsid);
+  WiFi.disconnect();
+  wifiEstabaConectado = false;
+  conectarWiFi();
+}
+
 void atenderWiFi() {
+  if (cfgSsid.length() == 0) return;
+
   if (WiFi.status() == WL_CONNECTED) {
     if (!wifiEstabaConectado) {
       Serial.print("[WiFi] Conectado. IP: ");
@@ -344,21 +326,19 @@ void atenderWiFi() {
   if (millis() - tUltimoIntentoWiFi > INTERVALO_RECONEXION_MS) {
     Serial.println("[WiFi] Reintentando conexion en segundo plano.");
     WiFi.disconnect();
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    tUltimoIntentoWiFi = millis();
+    conectarWiFi();
   }
 }
 
 void iniciarWiFi() {
-  Serial.print("[WiFi] Iniciando conexion a ");
-  Serial.println(WIFI_SSID);
   WiFi.mode(WIFI_STA);
-  // Sin ahorro de energia del modem: con el ahorro activo el router entrega los
-  // paquetes por lotes y cada peticion puede tardar 100-300 ms mas.
-  WiFi.setSleep(false);
+  WiFi.setSleep(false);   // con el ahorro de energia cada peticion tarda 100-300 ms mas
   iniciarEspNow();
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  tUltimoIntentoWiFi = millis();
+  if (cfgSsid.length() > 0) {
+    Serial.print("[WiFi] Conectando a ");
+    Serial.println(cfgSsid);
+    conectarWiFi();
+  }
 }
 
 // ===================== Envio de mediciones =====================
@@ -368,17 +348,15 @@ bool enviarMedicion(unsigned long numeroRegistro, const char* variable,
                     int valor, long &latenciaMs) {
   if (!redLista()) return false;
 
-  String url = String(BACKEND_BASE) + "/mediciones";
-
   HTTPClient http;
   http.setTimeout(TIMEOUT_HTTP_MS);
-  http.setReuse(USAR_HTTPS);
-  http.begin(clienteBackend(), url);
+  http.setReuse(usaHttps());
+  http.begin(clienteBackend(), cfgServidor + "/mediciones");
   http.addHeader("Content-Type", "application/json");
-  http.addHeader("X-Device-Token", DEVICE_TOKEN);
+  http.addHeader("X-Device-Token", cfgToken);
 
   JsonDocument doc;
-  doc["vivienda_id"]     = VIVIENDA_ID;
+  doc["vivienda_id"]     = cfgVivienda;
   doc["zona"]            = zona;
   doc["nodo_id"]         = nodoId;
   doc["sensor_id"]       = sensorId;
@@ -407,9 +385,11 @@ bool enviarMedicion(unsigned long numeroRegistro, const char* variable,
   Serial.print(latenciaMs);
   Serial.println(" ms");
 
+  if (codigo == 401 || codigo == 403) Serial.println("   Token rechazado. Revisa el comando token.");
   return (codigo == 201);
 }
 
+// Buffer en RAM para los eventos que no se pudieron enviar
 void guardarEnBuffer(unsigned long numeroRegistro, const char* variable,
                      const char* zona, const char* sensorId, const char* nodoId, int valor) {
   if (eventosEnBuffer >= CAPACIDAD_BUFFER) {
@@ -454,14 +434,16 @@ void intentarVaciarBuffer() {
 
 // ===================== Logica de alarma =====================
 
-/*
- * Decide que hacer con un evento confirmado.
- *
- * La salida audible solo se activa cuando el sistema esta armado, el evento
- * corresponde a una condicion de alarma y el modo silencioso esta desactivado.
- * El registro y el envio ocurren siempre, incluso en modo silencioso, porque
- * lo que el modo silencioso suprime es el ruido, no la evidencia.
- */
+void guardarDatosAlarma(const char* variable, const char* zona, const char* sensorId, const char* nodoId) {
+  strncpy(motivoAlarma, variable, sizeof(motivoAlarma) - 1); motivoAlarma[sizeof(motivoAlarma) - 1] = '\0';
+  strncpy(zonaAlarma, zona, sizeof(zonaAlarma) - 1);         zonaAlarma[sizeof(zonaAlarma) - 1] = '\0';
+  strncpy(sensorAlarma, sensorId, sizeof(sensorAlarma) - 1); sensorAlarma[sizeof(sensorAlarma) - 1] = '\0';
+  strncpy(nodoAlarma, nodoId, sizeof(nodoAlarma) - 1);       nodoAlarma[sizeof(nodoAlarma) - 1] = '\0';
+}
+
+// Decide que hacer con un evento. La sirena suena solo si el sistema esta armado,
+// el evento es de alarma y no hay modo silencioso. El registro se hace siempre:
+// el modo silencioso suprime el ruido, no la evidencia.
 void procesarEvento(const char* variable, const char* zona,
                     const char* sensorId, const char* nodoId, int valor, bool esAlarma) {
   contadorRegistro++;
@@ -480,33 +462,21 @@ void procesarEvento(const char* variable, const char* zona,
   Serial.println(nodoId);
 
   if (esAlarma && sistemaArmado) {
+    guardarDatosAlarma(variable, zona, sensorId, nodoId);
     if (modoSilencioso) {
-      Serial.println("   ALARMA en modo silencioso. Se registra y se notifica sin activar la salida.");
-      strncpy(motivoAlarma, variable, sizeof(motivoAlarma) - 1); motivoAlarma[sizeof(motivoAlarma) - 1] = '\0';
-      strncpy(zonaAlarma, zona, sizeof(zonaAlarma) - 1);         zonaAlarma[sizeof(zonaAlarma) - 1] = '\0';
-      strncpy(sensorAlarma, sensorId, sizeof(sensorAlarma) - 1); sensorAlarma[sizeof(sensorAlarma) - 1] = '\0';
-      strncpy(nodoAlarma, nodoId, sizeof(nodoAlarma) - 1);       nodoAlarma[sizeof(nodoAlarma) - 1] = '\0';
-      // Un solo intento. El evento ya queda registrado como medicion, y este
-      // aviso solo sirve para la notificacion.
+      Serial.println("   ALARMA en modo silencioso. Se notifica sin activar la salida.");
       tDisparoAlarma = millis();
-      enviarAlarma(true, true);
+      enviarAlarma(true, true);   // un solo intento, solo sirve para la notificacion
     } else {
       Serial.println("   ALARMA. Se activa la salida audible.");
       if (!sirenaPorAlarma) {
-        // Alarma nueva. Todavia no la conoce el backend.
         alarmaConfirmada = false;
         alarmaReportadaActiva = false;
       }
-      strncpy(motivoAlarma, variable, sizeof(motivoAlarma) - 1); motivoAlarma[sizeof(motivoAlarma) - 1] = '\0';
-      strncpy(zonaAlarma, zona, sizeof(zonaAlarma) - 1);         zonaAlarma[sizeof(zonaAlarma) - 1] = '\0';
-      strncpy(sensorAlarma, sensorId, sizeof(sensorAlarma) - 1); sensorAlarma[sizeof(sensorAlarma) - 1] = '\0';
-      strncpy(nodoAlarma, nodoId, sizeof(nodoAlarma) - 1);       nodoAlarma[sizeof(nodoAlarma) - 1] = '\0';
       sirenaPorAlarma = true;
       tInicioSirena = millis();
       tDisparoAlarma = tInicioSirena;
-      // El aviso de alarma sale ANTES que el registro de la medicion. Antes iba
-      // despues, y si el servidor tardaba (reintentos de hasta 5 s cada uno) la
-      // notificacion se retrasaba por algo que no es urgente.
+      // El aviso sale antes que el registro de la medicion para no retrasar la notificacion
       sincronizarAlarma();
     }
   } else if (esAlarma) {
@@ -538,23 +508,20 @@ void procesarEvento(const char* variable, const char* zona,
   Serial.println(enviosFallidos);
 }
 
-/*
- * Avisa al backend de una alarma. Con silenciosa = true el aviso es solo para
- * que se notifique, porque no hay sirena que apagar despues.
- * Devuelve true si el backend respondio correctamente.
- */
+// Avisa al backend de una alarma. Con silenciosa = true es solo para notificar,
+// porque no hay sirena que apagar despues.
 bool enviarAlarma(bool activa, bool silenciosa) {
   if (!redLista()) return false;
 
   HTTPClient http;
   http.setTimeout(TIMEOUT_HTTP_MS);
-  http.setReuse(USAR_HTTPS);
-  http.begin(clienteBackend(), String(BACKEND_BASE) + "/alarma");
+  http.setReuse(usaHttps());
+  http.begin(clienteBackend(), cfgServidor + "/alarma");
   http.addHeader("Content-Type", "application/json");
-  http.addHeader("X-Device-Token", DEVICE_TOKEN);
+  http.addHeader("X-Device-Token", cfgToken);
 
   JsonDocument doc;
-  doc["vivienda_id"] = VIVIENDA_ID;
+  doc["vivienda_id"] = cfgVivienda;
   doc["nodo_id"]     = nodoAlarma[0] ? nodoAlarma : NODO_ID;
   doc["activa"]      = activa;
   if (activa) {
@@ -579,21 +546,14 @@ bool enviarAlarma(bool activa, bool silenciosa) {
   return (codigo == 200);
 }
 
-bool reportarAlarma(bool activa) {
-  return enviarAlarma(activa, false);
-}
-
-/*
- * Mantiene al backend al tanto de si la alarma esta sonando. Si no hay
- * conexion, el aviso queda pendiente y se reintenta despues.
- */
+// Mantiene al backend al tanto de si la alarma suena. Sin red, queda pendiente.
 void sincronizarAlarma() {
   if (alarmaReportadaActiva == sirenaPorAlarma) return;
   if (!redLista()) return;
   if (millis() - tUltimoReporteAlarma < INTERVALO_REPORTE_ALARMA_MS) return;
 
   tUltimoReporteAlarma = millis();
-  if (reportarAlarma(sirenaPorAlarma)) alarmaReportadaActiva = sirenaPorAlarma;
+  if (enviarAlarma(sirenaPorAlarma, false)) alarmaReportadaActiva = sirenaPorAlarma;
 }
 
 void apagarAlarmaLocal(const char* motivo) {
@@ -604,22 +564,15 @@ void apagarAlarmaLocal(const char* motivo) {
   Serial.println(motivo);
 }
 
-/*
- * Consulta el estado de armado en el backend.
- * Se usa consulta periodica porque sobre HTTP no existe un canal permanente
- * hacia el dispositivo. En el prototipo alfa se sustituye por MQTT, donde el
- * servidor si puede avisar en el momento en que ocurre el cambio.
- */
+// Consulta el estado de armado en el backend (cada INTERVALO_ESTADO_MS)
 void consultarEstado() {
   if (!redLista()) return;
 
-  String url = String(BACKEND_BASE) + "/estado?vivienda_id=" + VIVIENDA_ID;
-
   HTTPClient http;
   http.setTimeout(TIMEOUT_HTTP_MS);
-  http.setReuse(USAR_HTTPS);
-  http.begin(clienteBackend(), url);
-  http.addHeader("X-Device-Token", DEVICE_TOKEN);
+  http.setReuse(usaHttps());
+  http.begin(clienteBackend(), cfgServidor + "/estado?vivienda_id=" + cfgVivienda);
+  http.addHeader("X-Device-Token", cfgToken);
   int codigo = http.GET();
 
   if (codigo == 200) {
@@ -637,28 +590,24 @@ void consultarEstado() {
       }
 
       if (sirenaPorAlarma) {
-        // Al desarmar, la alarma se apaga de inmediato
         if (!sistemaArmado) {
           apagarAlarmaLocal("el sistema se desarmo");
         } else if (alarmaRemota) {
           alarmaConfirmada = true;
         } else if (alarmaConfirmada) {
-          // El backend la conocia como activa y ahora ya no: la apagaron
-          // desde la aplicacion. Si aun no la conocia, es un desfase normal
-          // porque el aviso todavia no llego, y no se debe apagar.
+          // El backend la tenia activa y ya no: la apagaron desde la app. Si aun
+          // no la conocia es solo un desfase del aviso y no se apaga.
           apagarAlarmaLocal("apagada desde la aplicacion");
         }
       }
     }
+  } else if (codigo == 401 || codigo == 403) {
+    Serial.println("[Estado] Token rechazado. Revisa el comando token.");
   }
   http.end();
 }
 
-/*
- * La salida se activa por dos motivos independientes: una alarma en curso, o
- * una activacion manual desde la aplicacion para probar la sirena.
- * Mientras esta activa parpadea, para simular el sonido de una sirena.
- */
+// La salida se activa por una alarma en curso o por una prueba manual desde la app
 void actualizarSalida() {
   if (sirenaPorAlarma && millis() - tInicioSirena > DURACION_SIRENA_MS) {
     apagarAlarmaLocal("se cumplio el tiempo maximo de sirena");
@@ -673,11 +622,10 @@ void actualizarSalida() {
   digitalWrite(PIN_LED_ESTADO, nivel ? HIGH : LOW);
 }
 
-// ===================== Recepcion de nodos perifericos (ESP-NOW) =====================
+// ===================== Recepcion de nodos (ESP-NOW) =====================
 
-// La funcion de recepcion corre en la tarea de Wi-Fi, no en el ciclo principal.
-// Solo copia el paquete a una cola; el ciclo lo procesa cuando puede, porque
-// procesar un evento hace peticiones HTTP que pueden tardar varios segundos.
+// La recepcion corre en la tarea de Wi-Fi: solo copia el paquete a una cola y
+// el ciclo principal lo procesa, porque procesar un evento hace peticiones HTTP.
 const int CAP_COLA_RX = 8;
 PaqueteSensor colaRx[CAP_COLA_RX];
 uint8_t colaRxMac[CAP_COLA_RX][6];
@@ -685,13 +633,47 @@ int8_t colaRxRssi[CAP_COLA_RX];
 volatile int rxEscribir = 0;
 volatile int rxLeer = 0;
 
+// Acepta la peticion de un C3 y le contesta por broadcast con su propia MAC
+// dentro, para que solo ese nodo la tome como suya.
+void responderEmparejamiento(const uint8_t* mac, const PaqueteSensor* peticion) {
+  if (!emparejando) return;
+  if (indicePareado(mac) < 0) {
+    if (numPareados >= MAX_PAREADOS) { nodosLlenos = true; return; }
+    memcpy(pareados[numPareados++], mac, 6);
+  }
+
+  memcpy(macNueva, mac, 6);
+  strncpy(nombreNuevo, peticion->nodoId, sizeof(nombreNuevo) - 1);
+  nombreNuevo[sizeof(nombreNuevo) - 1] = '\0';
+  nodoNuevo = true;
+
+  PaqueteSensor r;
+  memset(&r, 0, sizeof(r));
+  r.magia[0] = 'S';
+  r.magia[1] = 'R';
+  r.version = 1;
+  r.tipo = TIPO_RESPUESTA;
+  strncpy(r.nodoId, NODO_ID, sizeof(r.nodoId) - 1);
+  snprintf(r.variable, sizeof(r.variable), "%02X%02X%02X%02X%02X%02X",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  esp_now_send(MAC_BROADCAST, (const uint8_t*)&r, sizeof(r));
+}
+
 void guardarPaqueteRx(const uint8_t* mac, const uint8_t* datos, int largo, int rssi) {
   if (largo != (int)sizeof(PaqueteSensor)) return;
-  if (!macPermitida(mac)) return;   // con cifrado: solo los nodos de MACS_NODOS
   const PaqueteSensor* p = (const PaqueteSensor*)datos;
   if (p->magia[0] != 'S' || p->magia[1] != 'R' || p->version != 1) return;
+
+  if (p->tipo == TIPO_EMPAREJAR) { responderEmparejamiento(mac, p); return; }
+  if (p->tipo == TIPO_RESPUESTA) return;
+  if (!macPermitida(mac)) {
+    memcpy(macDesconocida, mac, 6);
+    hayDesconocido = true;
+    return;
+  }
+
   int sig = (rxEscribir + 1) % CAP_COLA_RX;
-  if (sig == rxLeer) return;   // cola llena: el nodo periferico reintentara
+  if (sig == rxLeer) return;   // cola llena: el nodo reintentara
   memcpy(&colaRx[rxEscribir], datos, sizeof(PaqueteSensor));
   memcpy(colaRxMac[rxEscribir], mac, 6);
   colaRxRssi[rxEscribir] = (int8_t)rssi;
@@ -705,12 +687,12 @@ void alRecibirEspNow(const esp_now_recv_info_t* info, const uint8_t* datos, int 
 }
 #else
 void alRecibirEspNow(const uint8_t* mac, const uint8_t* datos, int largo) {
-  guardarPaqueteRx(mac, datos, largo, 0);   // el core antiguo no entrega el RSSI
+  guardarPaqueteRx(mac, datos, largo, 0);   // el core antiguo no da el RSSI
 }
 #endif
 
-// Los reintentos del nodo periferico llegan con el mismo numero de secuencia.
-// Se descartan comparando con el ultimo aceptado de cada origen.
+// Los reintentos de un nodo llegan con la misma secuencia; se descartan
+// comparando con la ultima aceptada de cada origen.
 OrigenRemoto origenes[4];
 
 bool esDuplicado(const uint8_t* mac, uint32_t secuencia) {
@@ -732,8 +714,8 @@ bool esDuplicado(const uint8_t* mac, uint32_t secuencia) {
   return false;   // tabla llena: se acepta sin deduplicar
 }
 
-// Ultimo estado conocido de cada sensor remoto, para registrar el primero sin
-// disparar alarma y detectar cambios perdidos.
+// Ultimo estado de cada sensor remoto: el primero se registra sin disparar
+// alarma y sirve para detectar cambios perdidos.
 EstadoRemoto estadosRemotos[8];
 
 EstadoRemoto* buscarEstado(const char* sensorId) {
@@ -757,12 +739,10 @@ EstadoRemoto* crearEstado(const char* sensorId, int valor) {
 }
 
 // ===================== Registro automatico de nodos y sensores =====================
-/*
- * El concentrador recuerda cada nodo que escucha y los sensores que declara, y
- * cada LATIDO_INTERVALO_MS (o de inmediato si aparece algo nuevo) los reporta
- * en un solo POST /nodos/latido. Asi la aplicacion descubre sensores sin que el
- * residente toque el firmware, y sabe si un nodo dejo de comunicarse.
- */
+// Cada nodo que se escucha y cada sensor que declara se reportan en un solo
+// POST /nodos/latido (cada 30 s, o enseguida si aparece algo nuevo). Asi la app
+// descubre los sensores y sabe cuando un nodo deja de comunicarse.
+
 const unsigned long LATIDO_INTERVALO_MS = 30000;
 
 NodoVisto nodosVistos[MAX_NODOS];
@@ -785,7 +765,7 @@ NodoVisto* tocarNodoVisto(const char* nodoId, int rssi) {
   strncpy(libre->nodoId, nodoId, sizeof(libre->nodoId) - 1);
   libre->ultimoMs = millis();
   libre->rssi = rssi;
-  latidoUrgente = true;   // nodo nuevo: avisar ya
+  latidoUrgente = true;
   return libre;
 }
 
@@ -799,7 +779,7 @@ void recordarSensor(NodoVisto* n, const char* sensorId, const char* variable, co
   strncpy(s.sensorId, sensorId, sizeof(s.sensorId) - 1);
   strncpy(s.variable, variable, sizeof(s.variable) - 1);
   strncpy(s.zona, zona, sizeof(s.zona) - 1);
-  latidoUrgente = true;   // sensor nuevo: aparece en la app sin esperar
+  latidoUrgente = true;
 }
 
 void enviarLatidos() {
@@ -810,7 +790,7 @@ void enviarLatidos() {
   JsonDocument doc;
   JsonArray lista = doc["nodos"].to<JsonArray>();
 
-  // Sensores conectados directamente a este concentrador
+  // Sensores conectados directo a este concentrador
   if (NUM_CONTACTOS + NUM_PIRS > 0) {
     JsonObject o = lista.add<JsonObject>();
     o["nodo_id"] = NODO_ID;
@@ -847,16 +827,16 @@ void enviarLatidos() {
 
   HTTPClient http;
   http.setTimeout(TIMEOUT_HTTP_MS);
-  http.setReuse(USAR_HTTPS);
-  http.begin(clienteBackend(), String(BACKEND_BASE) + "/nodos/latido");
+  http.setReuse(usaHttps());
+  http.begin(clienteBackend(), cfgServidor + "/nodos/latido");
   http.addHeader("Content-Type", "application/json");
-  http.addHeader("X-Device-Token", DEVICE_TOKEN);
+  http.addHeader("X-Device-Token", cfgToken);
   int codigo = http.POST(cuerpo);
   http.end();
 
   Serial.print("[Latido] nodos="); Serial.print(lista.size());
   Serial.print(" codigo="); Serial.println(codigo);
-  if (codigo == 401 || codigo == 403) Serial.println("   Token rechazado: revisa DEVICE_TOKEN.");
+  if (codigo == 401 || codigo == 403) Serial.println("   Token rechazado. Revisa el comando token.");
   if (codigo != 200) latidoUrgente = false;   // se reintenta en el siguiente intervalo
 }
 
@@ -866,7 +846,6 @@ void atenderLatidos() {
 }
 
 void procesarPaqueteRemoto(PaqueteSensor &p, const uint8_t* mac, int rssi) {
-  // Se garantiza el fin de cada texto antes de usarlo
   p.nodoId[sizeof(p.nodoId) - 1] = '\0';
   p.sensorId[sizeof(p.sensorId) - 1] = '\0';
   p.variable[sizeof(p.variable) - 1] = '\0';
@@ -892,8 +871,8 @@ void procesarPaqueteRemoto(PaqueteSensor &p, const uint8_t* mac, int rssi) {
   Serial.println(p.valor);
 
   if (p.tipo == TIPO_EVENTO) {
-    EstadoRemoto* e = esContacto ? buscarEstado(p.sensorId) : nullptr;
     if (esContacto) {
+      EstadoRemoto* e = buscarEstado(p.sensorId);
       if (e) e->valor = p.valor; else crearEstado(p.sensorId, p.valor);
     }
     procesarEvento(p.variable, p.zona, p.sensorId, p.nodoId, p.valor, p.valor == 1);
@@ -903,7 +882,7 @@ void procesarPaqueteRemoto(PaqueteSensor &p, const uint8_t* mac, int rssi) {
   if (p.tipo == TIPO_ESTADO) {
     EstadoRemoto* e = buscarEstado(p.sensorId);
     if (!e) {
-      // Primera vez que se ve este sensor: se registra sin activar alarma
+      // Primera vez que se ve el sensor: se registra sin activar alarma
       crearEstado(p.sensorId, p.valor);
       procesarEvento(p.variable, p.zona, p.sensorId, p.nodoId, p.valor, false);
     } else if (esContacto && e->valor != p.valor) {
@@ -918,45 +897,231 @@ void atenderRemotos() {
   while (rxLeer != rxEscribir) {
     PaqueteSensor p;
     uint8_t mac[6];
+    int8_t rssi = colaRxRssi[rxLeer];
     memcpy(&p, &colaRx[rxLeer], sizeof(p));
     memcpy(mac, colaRxMac[rxLeer], 6);
     rxLeer = (rxLeer + 1) % CAP_COLA_RX;
-    procesarPaqueteRemoto(p, mac, colaRxRssi[(rxLeer + CAP_COLA_RX - 1) % CAP_COLA_RX]);
+    procesarPaqueteRemoto(p, mac, rssi);
   }
 }
 
-// Lee la MAC directo del chip. WiFi.macAddress() puede devolver ceros si se
-// llama antes de que el Wi-Fi termine de arrancar.
+// ===================== Emparejamiento =====================
+
+void abrirEmparejamiento() {
+  emparejando = true;
+  tFinEmparejar = millis() + DURACION_EMPAREJAR_MS;
+  Serial.println("[Emparejar] Abierto por 2 minutos. Enciende el C3 (o espera a que busque).");
+}
+
+// Corre en el ciclo principal: guarda en flash y avisa lo que paso en la recepcion
+void atenderEmparejamiento() {
+  if (nodoNuevo) {
+    nodoNuevo = false;
+    registrarPares();
+    guardarNodos();
+    Serial.print("[Emparejar] Nodo enlazado: ");
+    Serial.print(nombreNuevo);
+    Serial.print(" (");
+    Serial.print(macATexto(macNueva));
+    Serial.println(")");
+  }
+  if (nodosLlenos) {
+    nodosLlenos = false;
+    Serial.println("[Emparejar] Ya hay 6 nodos. Usa olvidarnodos para liberar espacio.");
+  }
+  if (emparejando && (long)(millis() - tFinEmparejar) >= 0) {
+    emparejando = false;
+    Serial.println("[Emparejar] Cerrado.");
+  }
+
+  static unsigned long tAviso = 0;
+  if (hayDesconocido) {
+    hayDesconocido = false;
+    if (millis() - tAviso > 10000) {
+      tAviso = millis();
+      Serial.print("[ESP-NOW] Paquete de un nodo sin emparejar (");
+      Serial.print(macATexto(macDesconocida));
+      Serial.println("). Escribe emparejar para aceptarlo.");
+    }
+  }
+}
+
+// ===================== Consola serie =====================
+
+String lineaSerie;
+
+String enmascarar(const String& s, int visibles) {
+  if (s.length() == 0) return "(vacio)";
+  if ((int)s.length() <= visibles) return "****";
+  return s.substring(0, visibles) + "...";
+}
+
 void imprimirMac(const char* etiqueta) {
   uint8_t mac[6];
-  esp_read_mac(mac, ESP_MAC_WIFI_STA);
-  char texto[18];
-  snprintf(texto, sizeof(texto), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);   // WiFi.macAddress() puede dar ceros al arrancar
   Serial.print(etiqueta);
-  Serial.println(texto);
+  Serial.println(macATexto(mac));
+}
+
+void mostrarConfig() {
+  Serial.println("---------- Configuracion ----------");
+  Serial.print("Red:        "); Serial.println(cfgSsid.length() ? cfgSsid : String("(sin configurar)"));
+  Serial.print("Clave:      "); Serial.println(cfgClave.length() ? "****" : "(vacia)");
+  Serial.print("Wi-Fi:      "); Serial.println(WiFi.status() == WL_CONNECTED ? "conectado" : "sin conexion");
+  Serial.print("Servidor:   "); Serial.println(cfgServidor);
+  Serial.print("Token:      "); Serial.println(enmascarar(cfgToken, 6));
+  Serial.print("Vivienda:   "); Serial.println(cfgVivienda);
+  Serial.print("Nodos C3:   "); Serial.println(numPareados);
+  Serial.println("-----------------------------------");
+}
+
+void mostrarAyuda() {
+  Serial.println("Comandos:");
+  Serial.println("  wifi NOMBRE      nombre de la red Wi-Fi");
+  Serial.println("  clave PASSWORD   clave de la red (sin valor = red abierta)");
+  Serial.println("  conectar         reintenta la conexion con lo guardado");
+  Serial.println("  token hv_...     token de la vivienda");
+  Serial.println("  servidor URL     ej. http://dominio:8080 o https://dominio");
+  Serial.println("  vivienda ID      solo con el token global antiguo");
+  Serial.println("  emparejar        abre 2 min para enlazar C3 (emparejar cancelar)");
+  Serial.println("  nodos            lista los C3 emparejados");
+  Serial.println("  olvidarnodos     borra todos los emparejamientos");
+  Serial.println("  ver              muestra la configuracion");
+  Serial.println("  borrar           borra todo lo guardado y reinicia");
+  Serial.println("  reiniciar");
+}
+
+void ejecutarComando(String linea) {
+  linea.trim();
+  if (linea.length() == 0) return;
+  int esp = linea.indexOf(' ');
+  String cmd = (esp < 0) ? linea : linea.substring(0, esp);
+  String arg = (esp < 0) ? String("") : linea.substring(esp + 1);
+  cmd.toLowerCase();
+  arg.trim();
+
+  if (cmd == "wifi") {
+    if (arg.length() == 0) { Serial.println("Uso: wifi NOMBRE_DE_LA_RED"); return; }
+    cfgSsid = arg;
+    prefs.putString("ssid", cfgSsid);
+    Serial.println("Red guardada. Ahora escribe: clave TU_PASSWORD");
+  } else if (cmd == "clave") {
+    cfgClave = arg;
+    prefs.putString("clave", cfgClave);
+    Serial.println("Clave guardada.");
+    reconectarWiFi();
+  } else if (cmd == "conectar") {
+    reconectarWiFi();
+  } else if (cmd == "token") {
+    if (arg.length() == 0) { Serial.println("Uso: token hv_..."); return; }
+    cfgToken = arg;
+    prefs.putString("token", cfgToken);
+    Serial.println("Token guardado.");
+  } else if (cmd == "servidor") {
+    while (arg.endsWith("/")) arg.remove(arg.length() - 1);
+    if (!arg.startsWith("http://") && !arg.startsWith("https://")) {
+      Serial.println("Uso: servidor http://dominio:8080  (o https://dominio)");
+      return;
+    }
+    cfgServidor = arg;
+    prefs.putString("servidor", cfgServidor);
+    Serial.print("Servidor guardado: ");
+    Serial.println(cfgServidor);
+    if (WiFi.status() == WL_CONNECTED) sincronizarHora();
+  } else if (cmd == "vivienda") {
+    if (arg.length() == 0) { Serial.println("Uso: vivienda ID"); return; }
+    cfgVivienda = arg;
+    prefs.putString("vivienda", cfgVivienda);
+    Serial.println("Vivienda guardada.");
+  } else if (cmd == "emparejar") {
+    if (arg == "cancelar") { emparejando = false; Serial.println("[Emparejar] Cerrado."); }
+    else abrirEmparejamiento();
+  } else if (cmd == "nodos") {
+    if (numPareados == 0) Serial.println("Sin nodos emparejados.");
+    for (int i = 0; i < numPareados; i++) Serial.println(macATexto(pareados[i]));
+  } else if (cmd == "olvidarnodos") {
+    for (int i = 0; i < numPareados; i++) {
+      if (esp_now_is_peer_exist(pareados[i])) esp_now_del_peer(pareados[i]);
+    }
+    numPareados = 0;
+    guardarNodos();
+    Serial.println("Emparejamientos borrados.");
+  } else if (cmd == "ver") {
+    mostrarConfig();
+  } else if (cmd == "borrar") {
+    prefs.clear();
+    Serial.println("Todo borrado. Reiniciando.");
+    delay(300);
+    ESP.restart();
+  } else if (cmd == "reiniciar") {
+    ESP.restart();
+  } else if (cmd == "ayuda" || cmd == "help" || cmd == "?") {
+    mostrarAyuda();
+  } else {
+    Serial.println("Comando no reconocido. Escribe ayuda.");
+  }
+}
+
+void atenderConsola() {
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == '\r') continue;
+    if (c == '\n') {
+      String l = lineaSerie;
+      lineaSerie = "";
+      ejecutarComando(l);
+    } else if (lineaSerie.length() < 200) {
+      lineaSerie += c;
+    }
+  }
+}
+
+// Recuerda lo que falta mientras la configuracion este incompleta
+void avisarConfigIncompleta() {
+  static unsigned long t = 0;
+  if (millis() - t < 30000) return;
+  t = millis();
+  if (cfgSsid.length() == 0) Serial.println("[Config] Falta la red. Escribe: wifi NOMBRE y despues clave PASSWORD");
+  else if (cfgToken.length() == 0) Serial.println("[Config] Falta el token. Escribe: token hv_...");
+}
+
+// ===================== ESP-NOW =====================
+
+// Con cifrado, cada C3 emparejado se registra como par cifrado
+void registrarPares() {
+  if (!USAR_CIFRADO) return;
+  for (int i = 0; i < numPareados; i++) {
+    if (esp_now_is_peer_exist(pareados[i])) continue;
+    esp_now_peer_info_t par = {};
+    memcpy(par.peer_addr, pareados[i], 6);
+    par.channel = 0;
+    par.ifidx = WIFI_IF_STA;
+    par.encrypt = true;
+    memcpy(par.lmk, CLAVE_LMK, 16);
+    if (esp_now_add_peer(&par) != ESP_OK) Serial.printf("[ESP-NOW] No se pudo registrar el nodo %d cifrado.\n", i + 1);
+  }
 }
 
 void iniciarEspNow() {
-  imprimirMac("[MAC] Esta placa (nodo receptor): ");
+  imprimirMac("[MAC] Esta placa (concentrador): ");
 
   if (esp_now_init() != ESP_OK) {
-    Serial.println("[ESP-NOW] No se pudo iniciar. No se recibiran nodos perifericos.");
+    Serial.println("[ESP-NOW] No se pudo iniciar. No se recibiran nodos C3.");
     return;
   }
-  if (USAR_CIFRADO) {
-    esp_now_set_pmk((const uint8_t*)CLAVE_PMK);
-    for (int i = 0; i < NUM_NODOS_PERMITIDOS && i < 6; i++) {
-      esp_now_peer_info_t par = {};
-      memcpy(par.peer_addr, MACS_NODOS[i], 6);
-      par.channel = 0;
-      par.ifidx = WIFI_IF_STA;
-      par.encrypt = true;
-      memcpy(par.lmk, CLAVE_LMK, 16);
-      if (esp_now_add_peer(&par) != ESP_OK) Serial.printf("[ESP-NOW] No se pudo registrar el nodo %d cifrado.\n", i + 1);
-    }
-  }
+  if (USAR_CIFRADO) esp_now_set_pmk((const uint8_t*)CLAVE_PMK);
+
+  // Par de broadcast: con el se contesta a los C3 que piden emparejarse
+  esp_now_peer_info_t bc = {};
+  memcpy(bc.peer_addr, MAC_BROADCAST, 6);
+  bc.channel = 0;
+  bc.ifidx = WIFI_IF_STA;
+  bc.encrypt = false;
+  esp_now_add_peer(&bc);
+
+  registrarPares();
   esp_now_register_recv_cb(alRecibirEspNow);
-  Serial.println("[ESP-NOW] Escuchando nodos perifericos.");
+  Serial.println("[ESP-NOW] Escuchando nodos C3.");
 }
 
 // ===================== setup / loop =====================
@@ -968,8 +1133,7 @@ void setup() {
   for (int i = 0; i < NUM_CONTACTOS; i++) {
     pinMode(contactos[i].pin, INPUT_PULLUP);
   }
-  // Entrada simple, igual que en el sketch de prueba que si funciono. El AM312
-  // maneja su salida activamente, asi que no necesita resistencias internas.
+  // El AM312 maneja su salida activamente: sin resistencias internas
   for (int i = 0; i < NUM_PIRS; i++) {
     pinMode(pirs[i].pin, INPUT);
   }
@@ -983,25 +1147,15 @@ void setup() {
     contactos[i].previa  = contactos[i].estable;
   }
 
+  cargarConfig();
+
   Serial.println();
   Serial.println("==========================================");
-  Serial.println(" Nodo sensor - Sistema de seguridad");
-  Serial.print(" Vivienda: "); Serial.println(VIVIENDA_ID);
-  Serial.print(" Nodo:     "); Serial.println(NODO_ID);
-  Serial.println(USAR_SENSORES_LOCALES ? " Sensores locales:" : " Sensores locales: desactivados (los aporta el nodo C3 por ESP-NOW)");
-  for (int i = 0; i < NUM_CONTACTOS; i++) {
-    Serial.print("   contacto  "); Serial.print(contactos[i].sensorId);
-    Serial.print(" (GPIO "); Serial.print(contactos[i].pin); Serial.print(", ");
-    Serial.print(contactos[i].zona); Serial.println(")");
-  }
-  for (int i = 0; i < NUM_PIRS; i++) {
-    Serial.print("   movimiento "); Serial.print(pirs[i].sensorId);
-    Serial.print(" (GPIO "); Serial.print(pirs[i].pin); Serial.print(", ");
-    Serial.print(pirs[i].zona); Serial.println(")");
-  }
+  Serial.println(" Concentrador - Sistema de seguridad");
+  Serial.print(" Nodo: "); Serial.println(NODO_ID);
+  Serial.println(USAR_SENSORES_LOCALES ? " Sensores locales activos" : " Sensores locales: desactivados (los aportan los C3)");
   Serial.println("==========================================");
 
-  // El AM312 necesita estabilizarse tras el encendido antes de ser fiable
   if (NUM_PIRS > 0) {
     Serial.print("[PIR] Estabilizando el sensor durante ");
     Serial.print(PIR_ESTABILIZACION_MS / 1000);
@@ -1009,10 +1163,15 @@ void setup() {
   }
 
   iniciarWiFi();
+  mostrarConfig();
+  if (numPareados == 0) Serial.println("[Emparejar] Sin nodos C3. Escribe emparejar y enciende el C3.");
+  Serial.println("Escribe ayuda para ver los comandos.");
 }
 
 void loop() {
-  // ---- Contactos magneticos, con filtrado de rebote ----
+  atenderConsola();
+
+  // Contactos magneticos con filtrado de rebote
   for (int i = 0; i < NUM_CONTACTOS; i++) {
     Contacto &c = contactos[i];
     int lectura = digitalRead(c.pin);
@@ -1024,18 +1183,17 @@ void loop() {
 
     if ((millis() - c.tCambio) > DEBOUNCE_MS && lectura != c.estable) {
       c.estable = lectura;
-      // Con pull-up: circuito abierto significa que el iman se separo, o sea
-      // que la puerta o ventana se abrio. Esa es la condicion de alarma.
+      // Con pull-up, circuito abierto = el iman se separo = puerta abierta
       int valor = (c.estable == HIGH) ? 1 : 0;
       procesarEvento("estado_puerta", c.zona, c.sensorId, NODO_ID, valor, valor == 1);
     }
   }
 
-  // ---- Sensores de movimiento ----
+  // Sensores de movimiento
   if (NUM_PIRS > 0) {
     if (!pirListo) {
-      // Se ignora durante la estabilizacion. Las interrupciones se activan hasta
-      // que termina, para que el arranque del sensor no cuente como evento.
+      // Las interrupciones se activan al terminar la estabilizacion para que el
+      // arranque del sensor no cuente como evento
       if (millis() >= PIR_ESTABILIZACION_MS) {
         pirListo = true;
         for (int i = 0; i < NUM_PIRS; i++) {
@@ -1054,8 +1212,7 @@ void loop() {
     } else {
       for (int i = 0; i < NUM_PIRS; i++) {
         Pir &p = pirs[i];
-        // Respaldo por sondeo: si la interrupcion no llegara a dispararse, el
-        // flanco de subida se detecta igual leyendo el pin en cada ciclo.
+        // Respaldo por sondeo por si la interrupcion no se dispara
         int lect = digitalRead(p.pin);
         if (lect == HIGH && p.previa == LOW) p.pulso = true;
         p.previa = lect;
@@ -1064,8 +1221,6 @@ void loop() {
         Serial.print("[PIR] Pulso detectado en ");
         Serial.println(p.sensorId);
 
-        // Bloqueo posterior para no inundar de eventos mientras alguien
-        // permanece en la habitacion
         if (p.tUltimo == 0 || millis() - p.tUltimo > BLOQUEO_PIR_MS) {
           p.tUltimo = millis();
           procesarEvento("movimiento", p.zona, p.sensorId, NODO_ID, 1, true);
@@ -1076,17 +1231,14 @@ void loop() {
     }
   }
 
-  // ---- Eventos recibidos de los nodos perifericos por ESP-NOW ----
   atenderRemotos();
-
-  // ---- Latido por lotes: registro automatico y vigilancia de nodos ----
+  atenderEmparejamiento();
   atenderLatidos();
 
-  // ---- Red y sincronizacion, sin detener el ciclo ----
   atenderWiFi();
   if (redLista()) intentarVaciarBuffer();
+  avisarConfigIncompleta();
 
-  // ---- Consulta periodica del estado de armado ----
   if (millis() - tUltimoEstado > INTERVALO_ESTADO_MS) {
     tUltimoEstado = millis();
     consultarEstado();

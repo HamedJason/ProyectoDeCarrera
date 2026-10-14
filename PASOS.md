@@ -131,7 +131,7 @@ Se abre un editor de texto. Cambia dos valores:
 
 Para guardar en nano: `Ctrl+O`, Enter, y luego `Ctrl+X` para salir.
 
-Apunta el `DEVICE_TOKEN` que pusiste, lo necesitas en el firmware.
+Apunta el `DEVICE_TOKEN` que pusiste, lo escribirás en el firmware con el comando `token`.
 
 Ahora levanta todo:
 
@@ -298,17 +298,21 @@ https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32
 
 ### 6.2 Configurar
 
-Abre `firmware\nodo_sensor\nodo_sensor.ino` y edita estas cuatro líneas:
+El firmware ya no lleva la red ni el token escritos: se configuran por comandos
+y quedan guardados en la memoria de la placa. Carga `firmware\nodo_sensor\nodo_sensor.ino`,
+abre el **Monitor Serie** (115200 baudios, "Nueva línea" abajo) y escribe, uno por uno:
 
-```cpp
-const char* WIFI_SSID     = "nombre de tu red wifi";
-const char* WIFI_PASSWORD = "password de tu wifi";
-const char* BACKEND_BASE  = "http://privadaochil.ddns.net:8080";
-const char* DEVICE_TOKEN  = "TU_TOKEN";
+```
+wifi nombre de tu red wifi
+clave password de tu wifi
+token TU_TOKEN
+servidor http://privadaochil.ddns.net:8080
 ```
 
-`BACKEND_BASE` va **sin diagonal al final**. El `DEVICE_TOKEN` debe ser idéntico
-al del `.env` del VPS.
+El `token` es el que generas en la app (Ajustes → Vivienda → Administrar →
+Dispositivos) y el `servidor` va **sin diagonal al final**. Con `ver` revisas lo
+guardado (la clave y el token salen ocultos) y con `ayuda` ves todos los comandos.
+No hace falta recompilar para cambiar de red o de casa.
 
 > El ESP32 solo se conecta a redes de 2.4 GHz. Si tu router tiene una red separada
 > de 5 GHz, usa la de 2.4.
@@ -433,10 +437,12 @@ En el C3 evita los GPIO 2, 8 y 9 (arranque) y el 18 y 19 (USB).
 
 **Puesta en marcha, en este orden:**
 
-1. Carga `firmware/nodo_sensor/nodo_sensor.ino` en el ESP32 receptor (con tu Wi-Fi y `BACKEND_BASE`). Abre el monitor serie y copia la línea `[MAC] Esta placa (nodo receptor): AA:BB:...`.
-2. En `firmware/nodo_c3/nodo_c3.ino` pon esa dirección en `MAC_RECEPTOR`, en formato `{ 0xAA, 0xBB, ... }`, y carga el sketch en el C3. Placa en el IDE: *ESP32C3 Dev Module* (activa *USB CDC On Boot* para ver el monitor serie).
-3. El C3 imprime `[Enlace] Receptor encontrado en el canal N`. Si no aparece, revisa la MAC.
-4. Espera 45 s a que el PIR se estabilice. El receptor mostrará `[ESP-NOW] evento de nodo-c3-01: ...` con cada apertura o movimiento.
+1. Carga `firmware/nodo_sensor/nodo_sensor.ino` en el ESP32 receptor y configúralo por comandos (paso 6.2).
+2. Carga `firmware/nodo_c3/nodo_c3.ino` en el C3 (placa *ESP32C3 Dev Module*, con *USB CDC On Boot* activado para ver el monitor serie). No hay nada que editar: no lleva MAC ni red.
+3. En el monitor serie del receptor escribe `emparejar`. Se abre una ventana de 2 minutos; el C3 lo busca solo y ambos imprimen que quedaron enlazados (`[Emparejar] Nodo enlazado: c3-xxxxxx`). El C3 guarda la MAC del receptor y ya no vuelve a necesitar el emparejamiento.
+4. Espera 45 s a que el PIR se estabilice. El receptor mostrará `[ESP-NOW] evento de c3-xxxxxx: ...` con cada apertura o movimiento.
+
+El receptor solo acepta los C3 emparejados; si llega un paquete de uno sin emparejar lo avisa en el monitor. En el C3, el comando `olvidar` borra el emparejamiento (para llevarlo a otro receptor) y `ver` muestra su estado. En el receptor, `nodos` lista los C3 emparejados y `olvidarnodos` los borra.
 
 El C3 busca solo el canal del receptor (el del router) y lo vuelve a buscar si cambia. Si el receptor está apagado, guarda hasta 16 eventos y los manda al volver.
 
@@ -449,20 +455,20 @@ Si quieres que el receptor también lea sensores propios, pon `USAR_SENSORES_LOC
 
 1. En `nodo_c3.ino` y en `nodo_sensor.ino` pon `USAR_CIFRADO = true`.
 2. **Cambia `CLAVE_PMK` y `CLAVE_LMK`** por 16 caracteres propios, iguales en el receptor y en todos los C3. Las que trae el código están en el repositorio y no son secretas.
-3. Arranca cada C3 y copia su línea `[MAC] Esta placa: ...`. En el receptor agrega una fila por C3 en `MACS_NODOS`, por ejemplo `{ 0x4C, 0x75, 0x25, 0xAB, 0xCD, 0xEF },`.
-4. Carga primero el receptor y luego los C3. El receptor descarta los paquetes de cualquier MAC que no esté en la lista.
+3. Carga el receptor y los C3 y empareja como siempre (`emparejar`). El receptor registra cada C3 emparejado como par cifrado; ya no hay lista de MACs que editar.
+4. Si ya habías emparejado antes de activar el cifrado, usa `olvidarnodos` en el receptor y `olvidar` en cada C3, y empareja de nuevo.
 
 Limitaciones: el cifrado protege el contenido (nadie puede leer ni falsificar un evento sin la LMK), pero ESP-NOW no avisa al receptor si un paquete llegó cifrado o no, así que la lista de MACs por sí sola no frena a quien clone una MAC. Es un nivel razonable para la prueba de concepto; para producción se agregaría un contador firmado. Con el cifrado activo el límite es de 6 nodos C3 por receptor.
 
 ### HTTPS en el hub y la cámara (opcional)
 
-Por defecto `USAR_HTTPS = false` y el firmware usa `http://sentinelhome.ddns.net:8080`. Para cifrar también el tramo Wi-Fi → internet:
+Por defecto el servidor es `http://privadaochil.ddns.net:8080`. Para cifrar también el tramo Wi-Fi → internet basta con cambiar la URL por comando, en el hub y en la cámara:
 
-1. En el hub y en la cámara pon `USAR_HTTPS = true` y `BACKEND_BASE = "https://sentinelhome.ddns.net"` (el puerto 443 lo atiende Caddy con certificado Let's Encrypt).
+1. Escribe `servidor https://TU_DOMINIO` (sin puerto alterno; el 443 lo atiende Caddy con certificado Let's Encrypt). El firmware usa HTTPS cuando la URL empieza con `https://`.
 2. El firmware valida el certificado contra la raíz **ISRG Root X1** (y X2) incluida en `raiz_tls.h`. Si Let's Encrypt cambiara su cadena y el hub imprime errores de certificado, sustituye la raíz en ese archivo.
 3. El ESP32 no tiene reloj propio: necesita sincronizar la hora por NTP antes de validar el certificado (lo hace solo al conectarse al Wi-Fi; no envía nada hasta tener hora).
-4. Costo: el primer enlace tarda de 1 a 3 s y la conexión se reutiliza después. Si en las pruebas de latencia (`medir_tiempos.js`) el aviso se retrasa de forma apreciable, prueba primero con HTTP en el puerto 8080 para comparar y documenta ambos resultados.
-5. `HTTPS_SIN_VERIFICAR = true` cifra sin validar el certificado; úsalo solo para diagnosticar.
+4. Costo: el primer enlace tarda de 1 a 3 s y la conexión se reutiliza después. Si en las pruebas de latencia (`medir_tiempos.js`) el aviso se retrasa de forma apreciable, compara con HTTP en el puerto 8080 y documenta ambos resultados.
+5. `HTTPS_VERIFICAR = false` (constante en el código) cifra sin validar el certificado; úsalo solo para diagnosticar.
 
 ### Notificación con foto
 
@@ -534,7 +540,7 @@ conservan.
 | PowerShell muestra `>>` y no ejecuta | La línea quedó incompleta por las comillas | `Ctrl+C` para salir, y vuelve a intentar |
 | No compila, error en `JsonDocument` | ArduinoJson versión 6 | Instala la versión 7 |
 | `codigo=-1` en el monitor | URL con diagonal final, o el certificado aún no se emite | Quita la diagonal, espera un minuto |
-| `codigo=401` | El token del firmware no coincide con el del `.env` | Compara ambos carácter por carácter |
+| `codigo=401` | El token guardado en la placa no coincide con el del servidor | Escribe `ver` para ver el inicio del token y, si hace falta, `token hv_...` de nuevo |
 | `codigo=404` | `BACKEND_BASE` mal escrito | Revisa que sea exactamente el dominio |
 | El ESP32 no aparece en Puerto | Falta driver USB, o el cable es solo de carga | Instala driver CP2102 o CH340, prueba otro cable |
 | No conecta al Wi-Fi | Red de 5 GHz | Usa la red de 2.4 GHz |

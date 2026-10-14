@@ -2,31 +2,32 @@
  * Proyecto de Carrera - Sistema escalable de seguridad residencial
  * Nodo periferico sobre ESP32-C3
  *
- * Este nodo NO se conecta a Internet ni al backend. Solo lee sus sensores y
- * manda cada evento por ESP-NOW al ESP32 "nodo receptor" (nodo_sensor.ino),
- * que decide si suena la alarma y avisa al backend.
+ * No se conecta a Internet. Lee sus sensores y manda cada evento por ESP-NOW
+ * al concentrador (nodo_sensor.ino), que decide si suena la alarma y avisa al
+ * backend.
  *
- *   [MC-38 + AM312] -> ESP32-C3 --ESP-NOW--> ESP32 receptor --Wi-Fi--> backend
+ *   [MC-38 + AM312] -> ESP32-C3 --ESP-NOW--> concentrador --Wi-Fi--> backend
  *
- * Por que ESP-NOW: es un enlace directo entre placas ESP32, sin router, con
- * confirmacion de entrega y latencia de pocos milisegundos.
+ * EMPAREJAMIENTO AUTOMATICO
+ *   No hay MAC ni canal escritos en el codigo. La primera vez, el C3 busca al
+ *   concentrador en los canales 1 a 13 y le pide enlazarse; el concentrador
+ *   responde si tiene abierto el comando "emparejar". El C3 guarda la MAC del
+ *   concentrador en su flash y ya no vuelve a necesitarlo.
+ *   Despues de un reinicio solo vuelve a buscar el canal (el del router).
  *
- * Detalle importante del canal: ESP-NOW solo funciona si las dos placas estan
- * en el mismo canal de radio. El receptor usa el canal de tu router, que no
- * se conoce de antemano, asi que este nodo lo busca solo: prueba los canales
- * 1 a 13 hasta que el receptor confirma la entrega. Si el canal cambia (por
- * ejemplo el router se reinicia), vuelve a buscarlo.
+ * Comandos por el Monitor Serie (115200, "Nueva linea"): ver, olvidar,
+ * reiniciar, ayuda.
  *
- * Si el receptor esta apagado, los eventos se guardan en una cola pequena y se
- * envian cuando vuelva.
+ * Si el concentrador esta apagado, los eventos esperan en una cola pequena.
  *
- * Conexiones (ESP32-C3, los pines se pueden cambiar abajo):
- *   MC-38:  un cable al GPIO 4 y el otro a GND (pull-up interno)
- *   AM312:  VCC al pin 3V3 (o 5V), GND a GND, VOUT al GPIO 5
- * Evitar en el C3 los pines de arranque 2, 8 y 9, y el 18 y 19 (USB).
+ * Conexiones (los pines se cambian abajo):
+ *   MC-38:  un cable al GPIO 4 (y otro al 3) y el otro a GND, con pull-up interno
+ *   AM312:  VCC a 3V3 (o 5V), GND a GND, VOUT al GPIO 5
+ * Evitar en el C3 los pines 2, 8 y 9 (arranque) y 18 y 19 (USB).
  */
 
 #include <WiFi.h>
+#include <Preferences.h>
 #include <esp_now.h>
 #include <esp_wifi.h>
 #include <esp_idf_version.h>
@@ -36,68 +37,58 @@
 #include <esp_system.h>
 #endif
 
-// ===================== Configuracion editable =====================
+// ===================== Configuracion =====================
 
-// Direccion MAC del ESP32 receptor. La imprime en el Serial al arrancar, en la
-// linea "[MAC] Esta placa (nodo receptor): AA:BB:CC:DD:EE:FF". Copiala aqui.
-uint8_t MAC_RECEPTOR[6] = { 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF };
+// Para conservar los identificadores de un nodo ya registrado con el firmware
+// anterior. Si no, dejalos vacios y el nodo se llama c3-xxxxxx con su MAC.
+const char* NODO_ID_ANTIGUO = "";
+const char* ID_PIR_ANTIGUO  = "";
+const char* ZONA            = "";   // lugar del nodo, opcional (ej. "sala")
 
-// ---- Identificacion AUTOMATICA ----
-// El nodo se identifica solo con los ultimos 3 bytes de su MAC, por ejemplo
-// "c3-a1b2c3", y sus sensores como "c3-a1b2c3-gpio4" o "c3-a1b2c3-pir". No hay
-// que escribir ningun identificador: al encenderlo, la aplicacion lo descubre
-// y muestra los sensores con la etiqueta "Nuevo". Ahi se les pone nombre y se
-// elige si son puerta o ventana.
-//
-// Solo para conservar los identificadores de un nodo que ya estaba registrado
-// con el firmware anterior, escribe aqui el identificador antiguo (si no, "").
-const char* NODO_ID_ANTIGUO = "";      // p. ej. "nodo-c3-01"
-const char* ID_PIR_ANTIGUO  = "";      // p. ej. "pir-sala-01"
-const char* ZONA            = "";      // opcional: lugar del nodo (ej. "sala")
-
-// Contactos magneticos (MC-38). Cada uno va entre su pin y GND, con pull-up
-// interno. Para agregar otro basta con anadir su pin.
-// "idAntiguo" es opcional (""): para conservar un sensor ya registrado.
+// Cada MC-38 va entre su pin y GND. "idAntiguo" es opcional.
 struct ContactoCfg {
   int pin;
   const char* idAntiguo;
 };
 const ContactoCfg CONTACTOS[] = {
-  { 4, "" },     // p. ej. { 4, "sensor-puerta-01" } para conservar el historial
+  { 4, "" },
   { 3, "" },
 };
 const int NUM_CONTACTOS = sizeof(CONTACTOS) / sizeof(CONTACTOS[0]);
 const int MAX_CONTACTOS = 6;
-const int PIN_PIR      = 5;   // salida del AM312, activa en alto
-const int PIN_LED      = -1;  // LED de estado opcional (-1 si no hay). Ej. 8 en algunas placas
+const int PIN_PIR = 5;    // salida del AM312, activa en alto
+const int PIN_LED = -1;   // LED de enlace opcional (-1 si no hay)
 
-// Cifrado ESP-NOW (opcional). Debe estar igual en el receptor, y ademas el
-// receptor necesita la MAC de este nodo. Dejalo en false para la primera prueba.
+// Cifrado ESP-NOW opcional; debe coincidir con el concentrador. Las claves estan
+// en el repositorio, asi que cambialas por otras de 16 caracteres si lo activas.
 const bool USAR_CIFRADO = false;
-const char* CLAVE_PMK = "pmk-uabc-2026-a1";   // exactamente 16 caracteres
-const char* CLAVE_LMK = "lmk-uabc-2026-b2";   // exactamente 16 caracteres
+const char* CLAVE_PMK = "pmk-uabc-2026-a1";
+const char* CLAVE_LMK = "lmk-uabc-2026-b2";
 
 // ===================== Parametros =====================
 
 const unsigned long DEBOUNCE_MS = 50;
 const unsigned long BLOQUEO_PIR_MS = 8000;
 const unsigned long PIR_ESTABILIZACION_MS = 45000;   // el AM312 tarda 30-60 s en estabilizarse
-const unsigned long INTERVALO_LATIDO_MS = 30000;     // reporta el estado del contacto aunque no cambie
+const unsigned long INTERVALO_LATIDO_MS = 30000;     // reporta el contacto aunque no cambie
 const unsigned long ESPERA_CONFIRMACION_MS = 80;
+const unsigned long ESPERA_RESPUESTA_MS = 100;       // por canal, al pedir emparejarse
 const int  REINTENTOS_ENVIO = 3;
 const int  FALLOS_PARA_REBUSCAR = 3;
 const unsigned long INTERVALO_BUSQUEDA_MS = 2000;
 
 // ===================== Protocolo =====================
-// Debe ser IDENTICO en nodo_sensor.ino (el receptor).
+// Igual que en nodo_sensor.ino
 
-const uint8_t TIPO_EVENTO = 1;   // el sensor cambio o detecto algo
-const uint8_t TIPO_ESTADO = 2;   // estado periodico, para registrar el sensor y corregir eventos perdidos
-const uint8_t TIPO_HOLA   = 3;   // prueba de canal, el receptor lo ignora
+const uint8_t TIPO_EVENTO    = 1;
+const uint8_t TIPO_ESTADO    = 2;
+const uint8_t TIPO_HOLA      = 3;
+const uint8_t TIPO_EMPAREJAR = 4;
+const uint8_t TIPO_RESPUESTA = 5;
 
 struct __attribute__((packed)) PaqueteSensor {
   uint8_t  magia[2];      // 'S', 'R'
-  uint8_t  version;       // 1
+  uint8_t  version;
   uint8_t  tipo;
   uint32_t secuencia;
   char     nodoId[16];
@@ -107,12 +98,14 @@ struct __attribute__((packed)) PaqueteSensor {
   int8_t   valor;
 };
 
+const uint8_t MAC_BROADCAST[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+
 // ===================== Estado interno =====================
 
-// Identificadores resultantes (se arman en setup)
 char NODO_ID[16];
 char ID_PIR[24];
 char contactoId[MAX_CONTACTOS][24];
+char macPropia[13];   // MAC en hexadecimal sin separadores, para reconocer la respuesta
 
 int  contactoEstable[MAX_CONTACTOS];
 int  contactoPrevio[MAX_CONTACTOS];
@@ -123,12 +116,16 @@ bool pirListo = false;
 int  pirPrevio = LOW;
 unsigned long tUltimoPir = 0;
 
-bool enlazado = false;
-int  canal = 0;
+Preferences prefs;
+uint8_t hubMac[6];          // MAC del concentrador, guardada al emparejar
+bool hubGuardado = false;
+
+bool enlazado = false;      // hay canal comun con el concentrador
 int  fallosSeguidos = 0;
 unsigned long tUltimaBusqueda = 0;
 unsigned long tUltimoLatido = 0;
 bool registroPirEnviado = false;
+int  rondasEmparejar = 0;
 
 uint32_t secuencia = 0;
 
@@ -136,16 +133,30 @@ uint32_t secuencia = 0;
 volatile bool envioTerminado = false;
 volatile bool envioOk = false;
 
+// La respuesta del concentrador llega en la funcion de recepcion
+volatile bool respuestaRecibida = false;
+uint8_t macRespuesta[6];
+
 const int CAP_COLA = 16;
 PaqueteSensor cola[CAP_COLA];
 int colaTam = 0;
 
+String lineaSerie;
+
 void IRAM_ATTR alDetectarPir() { pirPulso = true; }
+
+String macATexto(const uint8_t* mac) {
+  char t[18];
+  snprintf(t, sizeof(t), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  return String(t);
+}
 
 // Arma los identificadores a partir de la MAC del chip
 void armarIdentificadores() {
   uint8_t mac[6];
   esp_read_mac(mac, ESP_MAC_WIFI_STA);
+  snprintf(macPropia, sizeof(macPropia), "%02X%02X%02X%02X%02X%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
   char corto[8];
   snprintf(corto, sizeof(corto), "%02x%02x%02x", mac[3], mac[4], mac[5]);
   if (NODO_ID_ANTIGUO[0]) snprintf(NODO_ID, sizeof(NODO_ID), "%s", NODO_ID_ANTIGUO);
@@ -158,22 +169,9 @@ void armarIdentificadores() {
   }
 }
 
-// Lee la MAC directo del chip. WiFi.macAddress() puede devolver ceros si se
-// llama antes de que el Wi-Fi termine de arrancar.
-void imprimirMac(const char* etiqueta) {
-  uint8_t mac[6];
-  esp_read_mac(mac, ESP_MAC_WIFI_STA);
-  char texto[18];
-  snprintf(texto, sizeof(texto), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-  Serial.print(etiqueta);
-  Serial.println(texto);
-}
-
 // ===================== ESP-NOW =====================
 
-// La firma de la funcion de confirmacion cambio con la version del core de
-// ESP32 (IDF 5.5 en adelante). Como solo interesa si se entrego, se acepta
-// cualquiera de las dos.
+// La firma de las funciones de callback cambio con la version del core de ESP32
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)
 void alEnviar(const esp_now_send_info_t*, esp_now_send_status_t estado) {
 #else
@@ -181,6 +179,39 @@ void alEnviar(const uint8_t*, esp_now_send_status_t estado) {
 #endif
   envioOk = (estado == ESP_NOW_SEND_SUCCESS);
   envioTerminado = true;
+}
+
+// Solo interesa la respuesta de emparejamiento dirigida a esta placa
+void procesarRecepcion(const uint8_t* mac, const uint8_t* datos, int largo) {
+  if (hubGuardado || largo != (int)sizeof(PaqueteSensor)) return;
+  const PaqueteSensor* p = (const PaqueteSensor*)datos;
+  if (p->magia[0] != 'S' || p->magia[1] != 'R' || p->version != 1) return;
+  if (p->tipo != TIPO_RESPUESTA) return;
+  if (strncmp(p->variable, macPropia, 12) != 0) return;
+  memcpy(macRespuesta, mac, 6);
+  respuestaRecibida = true;
+}
+
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+void alRecibir(const esp_now_recv_info_t* info, const uint8_t* datos, int largo) {
+  procesarRecepcion(info->src_addr, datos, largo);
+}
+#else
+void alRecibir(const uint8_t* mac, const uint8_t* datos, int largo) {
+  procesarRecepcion(mac, datos, largo);
+}
+#endif
+
+// Registra al concentrador como destino de los envios
+bool registrarHub() {
+  if (esp_now_is_peer_exist(hubMac)) esp_now_del_peer(hubMac);
+  esp_now_peer_info_t par = {};
+  memcpy(par.peer_addr, hubMac, 6);
+  par.channel = 0;   // 0 = el canal actual, que cambia al buscar
+  par.ifidx = WIFI_IF_STA;
+  par.encrypt = USAR_CIFRADO;
+  if (USAR_CIFRADO) memcpy(par.lmk, CLAVE_LMK, 16);
+  return esp_now_add_peer(&par) == ESP_OK;
 }
 
 bool iniciarEspNow() {
@@ -193,15 +224,18 @@ bool iniciarEspNow() {
   }
   if (USAR_CIFRADO) esp_now_set_pmk((const uint8_t*)CLAVE_PMK);
   esp_now_register_send_cb(alEnviar);
+  esp_now_register_recv_cb(alRecibir);
 
-  esp_now_peer_info_t par = {};
-  memcpy(par.peer_addr, MAC_RECEPTOR, 6);
-  par.channel = 0;   // 0 = el canal actual, que se cambia al buscar
-  par.ifidx = WIFI_IF_STA;
-  par.encrypt = USAR_CIFRADO;
-  if (USAR_CIFRADO) memcpy(par.lmk, CLAVE_LMK, 16);
-  if (esp_now_add_peer(&par) != ESP_OK) {
-    Serial.println("[ESP-NOW] No se pudo registrar al receptor.");
+  // Par de broadcast, para pedir el emparejamiento
+  esp_now_peer_info_t bc = {};
+  memcpy(bc.peer_addr, MAC_BROADCAST, 6);
+  bc.channel = 0;
+  bc.ifidx = WIFI_IF_STA;
+  bc.encrypt = false;
+  esp_now_add_peer(&bc);
+
+  if (hubGuardado && !registrarHub()) {
+    Serial.println("[ESP-NOW] No se pudo registrar al concentrador.");
     return false;
   }
   return true;
@@ -222,20 +256,20 @@ void llenarPaquete(PaqueteSensor &p, uint8_t tipo, const char* sensorId,
   p.valor = (int8_t)valor;
 }
 
-// Un envio con confirmacion. ESP-NOW unicast devuelve exito solo si el
-// receptor contesta, por eso sirve tambien para saber si el canal es correcto.
+// Un envio con confirmacion. El unicast de ESP-NOW solo tiene exito si el
+// concentrador contesta, por eso sirve tambien para saber si el canal es correcto.
 bool enviarUnaVez(const PaqueteSensor &p) {
   envioTerminado = false;
   envioOk = false;
-  if (esp_now_send(MAC_RECEPTOR, (const uint8_t*)&p, sizeof(p)) != ESP_OK) return false;
+  if (esp_now_send(hubMac, (const uint8_t*)&p, sizeof(p)) != ESP_OK) return false;
   unsigned long t0 = millis();
   while (!envioTerminado && millis() - t0 < ESPERA_CONFIRMACION_MS) delay(1);
   return envioTerminado && envioOk;
 }
 
-// Prueba los canales 1 a 13 hasta que el receptor confirme una entrega
+// Con el concentrador ya conocido: prueba los canales 1 a 13 hasta que confirme
 bool buscarCanal() {
-  Serial.println("[Enlace] Buscando el canal del receptor.");
+  Serial.println("[Enlace] Buscando el canal del concentrador.");
   PaqueteSensor hola;
   for (int c = 1; c <= 13; c++) {
     esp_wifi_set_channel(c, WIFI_SECOND_CHAN_NONE);
@@ -243,22 +277,50 @@ bool buscarCanal() {
     llenarPaquete(hola, TIPO_HOLA, "-", "-", "-", 0);
     for (int i = 0; i < 2; i++) {
       if (enviarUnaVez(hola)) {
-        canal = c;
-        Serial.print("[Enlace] Receptor encontrado en el canal ");
+        Serial.print("[Enlace] Concentrador encontrado en el canal ");
         Serial.println(c);
         return true;
       }
     }
   }
-  Serial.println("[Enlace] Sin respuesta del receptor. Se reintenta.");
+  Serial.println("[Enlace] Sin respuesta del concentrador. Se reintenta.");
   return false;
+}
+
+// Sin concentrador guardado: pide emparejarse por broadcast en cada canal y
+// espera la respuesta. Solo contesta un concentrador con "emparejar" abierto.
+bool buscarEmparejamiento() {
+  if (rondasEmparejar++ % 10 == 0) {
+    Serial.println("[Emparejar] Buscando un concentrador. Escribe emparejar en el suyo.");
+  }
+  PaqueteSensor req;
+  respuestaRecibida = false;
+  for (int c = 1; c <= 13; c++) {
+    esp_wifi_set_channel(c, WIFI_SECOND_CHAN_NONE);
+    delay(5);
+    llenarPaquete(req, TIPO_EMPAREJAR, "-", "-", "-", 0);
+    esp_now_send(MAC_BROADCAST, (const uint8_t*)&req, sizeof(req));
+    unsigned long t0 = millis();
+    while (!respuestaRecibida && millis() - t0 < ESPERA_RESPUESTA_MS) delay(1);
+    if (respuestaRecibida) return true;
+  }
+  return false;
+}
+
+void guardarHub() {
+  memcpy(hubMac, macRespuesta, 6);
+  prefs.putBytes("hub", hubMac, 6);
+  hubGuardado = true;
+  registrarHub();
+  Serial.print("[Emparejar] Enlazado con el concentrador ");
+  Serial.println(macATexto(hubMac));
 }
 
 // ===================== Cola de envio =====================
 
 void encolar(const PaqueteSensor &p) {
   if (colaTam >= CAP_COLA) {
-    // Cola llena: se descarta el mas antiguo para conservar lo reciente
+    // Llena: se descarta el mas antiguo para conservar lo reciente
     for (int i = 1; i < CAP_COLA; i++) cola[i - 1] = cola[i];
     colaTam = CAP_COLA - 1;
     Serial.println("[Cola] Llena. Se descarta el evento mas antiguo.");
@@ -291,11 +353,64 @@ void vaciarCola() {
   }
 }
 
-// ===================== setup / loop =====================
+// ===================== Consola serie =====================
+
+void mostrarEstado() {
+  Serial.println("---------- Estado ----------");
+  Serial.print("Nodo:         "); Serial.println(NODO_ID);
+  Serial.print("MAC:          ");
+  uint8_t mac[6];
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);
+  Serial.println(macATexto(mac));
+  Serial.print("Concentrador: ");
+  Serial.println(hubGuardado ? macATexto(hubMac) : String("sin emparejar"));
+  Serial.print("Enlace:       "); Serial.println(enlazado ? "activo" : "buscando");
+  Serial.print("En cola:      "); Serial.println(colaTam);
+  Serial.println("----------------------------");
+}
+
+void ejecutarComando(String linea) {
+  linea.trim();
+  linea.toLowerCase();
+  if (linea.length() == 0) return;
+
+  if (linea == "ver") {
+    mostrarEstado();
+  } else if (linea == "olvidar" || linea == "emparejar") {
+    if (hubGuardado && esp_now_is_peer_exist(hubMac)) esp_now_del_peer(hubMac);
+    prefs.remove("hub");
+    hubGuardado = false;
+    enlazado = false;
+    rondasEmparejar = 0;
+    Serial.println("Concentrador olvidado. Escribe emparejar en el concentrador.");
+  } else if (linea == "reiniciar") {
+    ESP.restart();
+  } else if (linea == "ayuda" || linea == "help" || linea == "?") {
+    Serial.println("Comandos: ver, olvidar (volver a emparejar), reiniciar");
+  } else {
+    Serial.println("Comando no reconocido. Escribe ayuda.");
+  }
+}
+
+void atenderConsola() {
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == '\r') continue;
+    if (c == '\n') {
+      String l = lineaSerie;
+      lineaSerie = "";
+      ejecutarComando(l);
+    } else if (lineaSerie.length() < 100) {
+      lineaSerie += c;
+    }
+  }
+}
 
 void indicarLed(bool encendido) {
   if (PIN_LED >= 0) digitalWrite(PIN_LED, encendido ? HIGH : LOW);
 }
+
+// ===================== setup / loop =====================
 
 void setup() {
   Serial.begin(115200);
@@ -305,7 +420,7 @@ void setup() {
     pinMode(CONTACTOS[i].pin, INPUT_PULLUP);
   }
   // Entrada simple para el AM312: su salida es debil y un pull-down interno
-  // la deja en un nivel intermedio.
+  // la dejaria en un nivel intermedio
   pinMode(PIN_PIR, INPUT);
   if (PIN_LED >= 0) pinMode(PIN_LED, OUTPUT);
 
@@ -317,6 +432,12 @@ void setup() {
 
   secuencia = esp_random();   // evita repetir numeros tras un reinicio
   armarIdentificadores();
+
+  prefs.begin("nodo", false);
+  if (prefs.getBytesLength("hub") == 6) {
+    prefs.getBytes("hub", hubMac, 6);
+    hubGuardado = true;
+  }
 
   Serial.println();
   Serial.println("==========================================");
@@ -334,7 +455,12 @@ void setup() {
     delay(5000);
     ESP.restart();
   }
-  imprimirMac("[MAC] Esta placa (nodo C3): ");
+  Serial.print("[MAC] Esta placa: ");
+  uint8_t mac[6];
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);
+  Serial.println(macATexto(mac));
+  Serial.println(hubGuardado ? "[Emparejar] Concentrador guardado: " + macATexto(hubMac)
+                             : String("[Emparejar] Sin concentrador. Se buscara uno al emparejar."));
 
   Serial.print("[PIR] Estabilizando el sensor durante ");
   Serial.print(PIR_ESTABILIZACION_MS / 1000);
@@ -343,8 +469,9 @@ void setup() {
 
 void loop() {
   unsigned long ahora = millis();
+  atenderConsola();
 
-  // ---- Contactos magneticos con filtrado de rebote ----
+  // Contactos magneticos con filtrado de rebote
   for (int i = 0; i < NUM_CONTACTOS && i < MAX_CONTACTOS; i++) {
     int lectura = digitalRead(CONTACTOS[i].pin);
     if (lectura != contactoPrevio[i]) {
@@ -363,7 +490,7 @@ void loop() {
     }
   }
 
-  // ---- Sensor de movimiento ----
+  // Sensor de movimiento
   if (!pirListo) {
     if (ahora >= PIR_ESTABILIZACION_MS) {
       pirListo = true;
@@ -376,7 +503,7 @@ void loop() {
       Serial.println(pirPrevio);
     }
   } else {
-    // Respaldo por sondeo por si la interrupcion no llegara a dispararse
+    // Respaldo por sondeo por si la interrupcion no se dispara
     int lp = digitalRead(PIN_PIR);
     if (lp == HIGH && pirPrevio == LOW) pirPulso = true;
     pirPrevio = lp;
@@ -395,17 +522,22 @@ void loop() {
     }
   }
 
-  // ---- Enlace con el receptor ----
-  if (!enlazado) {
-    if (ahora - tUltimaBusqueda > INTERVALO_BUSQUEDA_MS) {
-      tUltimaBusqueda = ahora;
+  // Enlace con el concentrador
+  if (!enlazado && ahora - tUltimaBusqueda > INTERVALO_BUSQUEDA_MS) {
+    tUltimaBusqueda = ahora;
+    if (!hubGuardado) {
+      if (buscarEmparejamiento()) {
+        guardarHub();
+        enlazado = true;
+      }
+    } else {
       enlazado = buscarCanal();
-      fallosSeguidos = 0;
-      if (enlazado) tUltimoLatido = 0;   // reporta el estado enseguida
     }
+    fallosSeguidos = 0;
+    if (enlazado) tUltimoLatido = 0;   // reporta el estado enseguida
   }
 
-  // ---- Estado periodico: registra los sensores y corrige eventos perdidos ----
+  // Estado periodico: registra los sensores y corrige eventos perdidos
   if (enlazado && (tUltimoLatido == 0 || ahora - tUltimoLatido > INTERVALO_LATIDO_MS)) {
     tUltimoLatido = ahora ? ahora : 1;
     PaqueteSensor p;
