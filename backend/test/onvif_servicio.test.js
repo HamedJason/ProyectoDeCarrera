@@ -185,3 +185,19 @@ test('el servicio ONVIF no abre RTSP: el codigo no menciona RTSP ni el puerto 55
     assert.ok(!/rtsp|:554|ffmpeg/i.test(t), `${f} menciona RTSP o ffmpeg`);
   }
 });
+
+test('si la camara cierra el socket en una espera, se repite sin perder la suscripcion ni el estado', async () => {
+  const { camara, servicio, motor, r, cerrar } = await montar();
+  try {
+    assert.ok(await hasta(() => motor.estado('c1').persona === false));
+    camara.cortarPulls = 2;
+    await esperarMs(100);
+    camara.emitir({ tipo: 'persona', valor: true });
+    assert.ok(await hasta(() => r.eventos.some((e) => e.detector === 'persona' && e.transicion === 'subida'), 6000), 'no llego el evento tras los cortes');
+    assert.ok(await hasta(() => servicio.estado().cortesRecuperados >= 2, 4000), 'no se recuperaron los cortes');
+    const est = servicio.estado();
+    assert.equal(est.conexiones, 1, 'se creo otra suscripcion');
+    assert.equal(motor.estado('c1').conectado, true);
+    assert.ok(!r.logs.some((l) => /perdida/.test(l)), 'se declaro perdida la conexion');
+  } finally { await cerrar(); }
+});
