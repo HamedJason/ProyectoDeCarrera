@@ -20,6 +20,8 @@ const crypto = require('crypto');
 const { pool, inicializarEsquema } = require('./db');
 const auth = require('./auth');
 const camara = require('./camara');
+const eventosCamara = require('./eventos_camara');
+const camaraRtsp = require('./camara_rtsp');
 const { exigirMiembro, autenticarDispositivo, rechazarDispositivo, quien } = auth;
 
 const app = express();
@@ -1122,7 +1124,7 @@ auth.montarRutas(app, {
   borrarDatosVivienda: async (id) => {
     await camara.borrarFotosVivienda(id);
     for (const t of ['mediciones', 'acciones', 'sensores', 'nodos', 'estado_vivienda', 'suscripciones_push',
-                     'camaras', 'tareas_camara', 'fotos', 'sesiones_vivo']) {
+                     'camaras', 'tareas_camara', 'fotos', 'sesiones_vivo', 'eventos_camara']) {
       await pool.query(`DELETE FROM ${t} WHERE vivienda_id = $1`, [id]);
     }
   }
@@ -1130,12 +1132,17 @@ auth.montarRutas(app, {
 // Segundo aviso de una alarma: la misma notificacion (misma etiqueta) se
 // actualiza con la foto de la camara. En iPhone la imagen no se muestra en la
 // notificacion, pero el texto y el enlace a la app si llegan.
-function notificarFoto(viviendaId, fotoId, firma) {
-  return notificarPush(viviendaId, 'ALARMA: foto de la camara', 'La camara tomo una foto del momento de la alarma.', 'alarma',
-    { imagen: `/fotos/${fotoId}/imagen?t=${firma}` });
+function notificarFoto(viviendaId, fotoId, firma, tarea) {
+  const imagen = { imagen: `/fotos/${fotoId}/imagen?t=${firma}` };
+  // Foto por una deteccion de la camara (persona o movimiento): no es una alarma
+  if (tarea && tarea.usuario === 'evento') {
+    return notificarPush(viviendaId, 'Camara: foto del evento', `${tarea.motivo || 'La camara detecto actividad'}.`, 'evento', imagen);
+  }
+  return notificarPush(viviendaId, 'ALARMA: foto de la camara', 'La camara tomo una foto del momento de la alarma.', 'alarma', imagen);
 }
 
 camara.montarRutas(app, { notificar, registrarAccion, notificarFoto });
+eventosCamara.montarRutas(app);
 
 // ===================== Frontend =====================
 
@@ -1180,10 +1187,13 @@ inicializarEsquema()
   .then(migrarSensoresAntiguos)
   .then(iniciarPush)
   .then(() => camara.iniciar())
+  .then(() => eventosCamara.iniciar({ notificar, solicitarFoto: camara.solicitarFotoAlarma }))
   .then(() => {
     setInterval(vigilarDispositivos, 30000).unref();
     app.listen(PUERTO, () => {
       console.log(`Backend escuchando en el puerto ${PUERTO}`);
+      // El agente de la camara habla con este mismo servidor por 127.0.0.1, asi que arranca cuando ya escucha
+      camaraRtsp.iniciar();
     });
   })
   .catch((e) => {

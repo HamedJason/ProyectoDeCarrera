@@ -263,3 +263,26 @@ ALTER TABLE suscripciones_push ADD COLUMN IF NOT EXISTS usuario_id INTEGER;
 -- de "un endpoint" a "un endpoint por vivienda".
 ALTER TABLE suscripciones_push DROP CONSTRAINT IF EXISTS suscripciones_push_endpoint_key;
 CREATE UNIQUE INDEX IF NOT EXISTS suscripciones_push_viv_ep ON suscripciones_push (vivienda_id, endpoint);
+
+-- ============================================================
+-- Eventos de la camara (deteccion de personas y movimiento por ONVIF)
+-- ============================================================
+-- Cada cambio real de estado queda registrado (subida o bajada). "alerta" indica
+-- si ese evento llego a avisar al residente: depende del cooldown, de si el
+-- sistema estaba armado y de la politica configurada. Nunca activa la sirena.
+CREATE TABLE IF NOT EXISTS eventos_camara (
+    id          SERIAL PRIMARY KEY,
+    vivienda_id TEXT        NOT NULL,
+    camara_id   TEXT        NOT NULL,
+    detector    TEXT        NOT NULL CHECK (detector IN ('persona', 'movimiento')),
+    valor       BOOLEAN     NOT NULL,
+    transicion  TEXT        NOT NULL CHECK (transicion IN ('subida', 'bajada')),
+    topic       TEXT,
+    regla       TEXT,
+    fuente      TEXT,
+    utc_camara  TIMESTAMPTZ,
+    alerta      BOOLEAN     NOT NULL DEFAULT FALSE,
+    nota        TEXT,
+    creado_en   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_eventos_camara_vivienda_fecha ON eventos_camara (vivienda_id, creado_en DESC);

@@ -135,11 +135,12 @@ async function crearTarea(viviendaId, tipo, { motivo = null, sensorId = null, ca
 }
 
 /*
- * Solicitud automatica por una alarma. No espera ni falla: la alerta al usuario
+ * Solicitud automatica por una alarma (o por una deteccion de la camara, con
+ * opciones.usuario = 'evento'). No espera ni falla: la alerta al usuario
  * nunca debe depender de la camara (RF-15). Si no hay camara conectada, o ya se
  * pidio una foto hace poco, no hace nada.
  */
-async function solicitarFotoAlarma(viviendaId, motivo, sensorId) {
+async function solicitarFotoAlarma(viviendaId, motivo, sensorId, opciones = {}) {
   try {
     if (Date.now() - (ultimaAuto.get(viviendaId) || 0) < 15000) return;
     if (vivos.has(viviendaId)) return;
@@ -148,7 +149,7 @@ async function solicitarFotoAlarma(viviendaId, motivo, sensorId) {
       `SELECT 1 FROM tareas_camara WHERE vivienda_id = $1 AND tipo = 'foto' AND terminada_en IS NULL LIMIT 1`, [viviendaId]);
     if (pend.rowCount) return;
     ultimaAuto.set(viviendaId, Date.now());
-    await crearTarea(viviendaId, 'foto', { motivo, sensorId, cantidad: RAFAGA_ALARMA, usuario: 'alarma' });
+    await crearTarea(viviendaId, 'foto', { motivo, sensorId, cantidad: RAFAGA_ALARMA, usuario: opciones.usuario || 'alarma' });
   } catch (e) {
     console.error('No se pudo solicitar la foto de la alarma:', e.message);
   }
@@ -383,8 +384,9 @@ function montarRutas(app, ganchos = {}) {
 
       // La primera foto de una alarma se manda en una notificacion, sin esperar
       // el resto de la rafaga. Si falla, no afecta a la foto ya guardada.
-      if (tarea.usuario === 'alarma' && tarea.tomadas === 0 && notificarFotoFn) {
-        Promise.resolve(notificarFotoFn(viviendaId, id, firmarFoto(id))).catch((e) => console.error('Push con foto:', e.message));
+      // 'evento' es una deteccion de la camara (persona o movimiento): mismo mecanismo, otro texto.
+      if ((tarea.usuario === 'alarma' || tarea.usuario === 'evento') && tarea.tomadas === 0 && notificarFotoFn) {
+        Promise.resolve(notificarFotoFn(viviendaId, id, firmarFoto(id), tarea)).catch((e) => console.error('Push con foto:', e.message));
       }
 
       const tomadas = tarea.tomadas + 1;

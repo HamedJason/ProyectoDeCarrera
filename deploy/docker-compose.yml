@@ -69,6 +69,27 @@ services:
       VIVO_SESION_MAX_S: ${VIVO_SESION_MAX_S:-300}
       VIVO_DIA_MAX_MIN: ${VIVO_DIA_MAX_MIN:-60}
       CAMARA_RAFAGA: ${CAMARA_RAFAGA:-3}
+      # Camara Mercusys MC210 por el tunel WireGuard (ver firmware/puente_camara_s3).
+      # Todo esto queda DESACTIVADO mientras ONVIF_ACTIVO y CAMARA_RTSP_ACTIVO no valgan 1.
+      # Eventos de personas y movimiento por ONVIF: solo registran y avisan, nunca activan la sirena.
+      ONVIF_ACTIVO: ${ONVIF_ACTIVO:-0}
+      ONVIF_VIVIENDA_ID: ${ONVIF_VIVIENDA_ID:-}
+      ONVIF_CAMARA_ID: ${ONVIF_CAMARA_ID:-mc210}
+      ONVIF_HOST: ${ONVIF_HOST:-10.8.0.2}
+      ONVIF_PUERTO: ${ONVIF_PUERTO:-2020}
+      ONVIF_USUARIO: ${ONVIF_USUARIO:-}
+      ONVIF_CLAVE: ${ONVIF_CLAVE:-}
+      ONVIF_ALERTAR: ${ONVIF_ALERTAR:-persona}
+      ONVIF_SOLO_ARMADO: ${ONVIF_SOLO_ARMADO:-1}
+      ONVIF_COOLDOWN_PERSONA_S: ${ONVIF_COOLDOWN_PERSONA_S:-60}
+      ONVIF_COOLDOWN_MOVIMIENTO_S: ${ONVIF_COOLDOWN_MOVIMIENTO_S:-120}
+      ONVIF_LOG_XML: ${ONVIF_LOG_XML:-}
+      # Fotos y vista en vivo de la MC210 por RTSP, solo bajo demanda (ffmpeg corre unos segundos por tarea).
+      # Si la vivienda tiene token propio, CAMARA_TOKEN debe ser ese; si no, se usa DEVICE_TOKEN.
+      CAMARA_RTSP_ACTIVO: ${CAMARA_RTSP_ACTIVO:-0}
+      CAMARA_TOKEN: ${CAMARA_TOKEN:-}
+      RTSP_RUTA_FOTO: ${RTSP_RUTA_FOTO:-stream1}
+      RTSP_RUTA_VIVO: ${RTSP_RUTA_VIVO:-stream2}
     volumes:
       - datos_fotos:/app/datos
     depends_on:

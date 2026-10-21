@@ -5,6 +5,10 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+# ffmpeg lo usa el agente de la camara (camara_rtsp.js) para sacar fotos y cuadros
+# de la MC210 por RTSP, solo cuando hay una tarea. Sin CAMARA_RTSP_ACTIVO=1 no se ejecuta.
+RUN apk add --no-cache ffmpeg
+
 # Se copian primero los archivos de dependencias para aprovechar la caché de Docker.
 # Si el código cambia pero las dependencias no, esta capa no se reconstruye.
 COPY package*.json ./
