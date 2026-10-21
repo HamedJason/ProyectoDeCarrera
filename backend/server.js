@@ -742,6 +742,95 @@ async function registrarAccion(viviendaId, accion, anterior, nuevo, usuario) {
 }
 
 /*
+ * Alarma disparada por la camara (eventos ONVIF, ver eventos_camara.js).
+ *
+ * La sirena la decide localmente el concentrador cuando un nodo le avisa; el servidor solo
+ * refleja ese estado. Para que suene por una deteccion de la camara se usa lo unico que el
+ * concentrador SI obedece del servidor: la salida audible (actuador_activo). Por eso se
+ * marca la alarma Y se enciende la salida, y se apaga sola pasados "segundos".
+ *
+ * Para que la salida no pueda quedar encendida por error:
+ *   - un temporizador la apaga (y se cancela si la alarma se apaga o el sistema se desarma
+ *     desde la aplicacion, ver POST /estado);
+ *   - la alarma queda marcada con alarma_sensor = 'camara'; si el servidor se reinicia
+ *     mientras suena, al arrancar se apaga todo lo marcado asi (recuperarAlarmasCamara).
+ * El concentrador consulta el estado cada pocos segundos, asi que la sirena tarda ese
+ * intervalo en reaccionar.
+ */
+const sirenasCamara = new Map();   // viviendaId -> { temporizador, encendioSalida }
+
+async function activarAlarmaCamara(viviendaId, texto, segundos) {
+  const previo = await obtenerEstado(viviendaId);
+  if (!previo.armado) return { avisado: false, nota: 'sistema desarmado' };
+  if (previo.alarma_activa) return { avisado: false, nota: 'ya habia una alarma activa' };
+
+  if (previo.modo_silencioso) {
+    // Igual que con un sensor: se registra y se avisa, pero no suena
+    await registrarAccion(viviendaId, 'alarma_silenciosa', false, true, 'camara');
+    notificar(viviendaId, 'Alarma en modo silencioso', `${texto}. La sirena no sono.`, 4, ['warning']);
+    camara.solicitarFotoAlarma(viviendaId, texto, null);
+    return { avisado: true, nota: null };
+  }
+
+  const r = await pool.query(
+    `UPDATE estado_vivienda
+        SET alarma_activa = true, alarma_motivo = $2, alarma_sensor = 'camara', actuador_activo = true, actualizado_en = NOW()
+      WHERE vivienda_id = $1 AND armado = true
+      RETURNING vivienda_id`, [viviendaId, texto]);
+  if (!r.rowCount) return { avisado: false, nota: 'sistema desarmado' };
+
+  const encendioSalida = !previo.actuador_activo;
+  await registrarAccion(viviendaId, 'alarma_activada', false, true, 'camara');
+  if (encendioSalida) await registrarAccion(viviendaId, 'salida_audible', false, true, 'camara');
+  notificar(viviendaId, 'ALARMA ACTIVADA', `${texto}.`, 5, ['rotating_light']);
+  camara.solicitarFotoAlarma(viviendaId, texto, null);
+
+  const anterior = sirenasCamara.get(viviendaId);
+  if (anterior) clearTimeout(anterior.temporizador);
+  const temporizador = setTimeout(() => {
+    terminarAlarmaCamara(viviendaId).catch((e) => console.error('No se pudo terminar la alarma de la camara:', e.message));
+  }, segundos * 1000);
+  sirenasCamara.set(viviendaId, { temporizador, encendioSalida });
+  console.log(`Alarma por camara: ${viviendaId}, suena ${segundos} s.`);
+  return { avisado: true, nota: null };
+}
+
+// Fin por tiempo: apaga la salida que se encendio y da por terminada la alarma (si sigue siendo la de la camara).
+// Todo en una sola sentencia, para que no haya un instante con la sirena apagada y la alarma aun marcada.
+async function terminarAlarmaCamara(viviendaId) {
+  const s = sirenasCamara.get(viviendaId);
+  if (!s) return;
+  sirenasCamara.delete(viviendaId);
+  clearTimeout(s.temporizador);
+  const antes = (await pool.query('SELECT actuador_activo, alarma_sensor FROM estado_vivienda WHERE vivienda_id = $1', [viviendaId])).rows[0];
+  if (!antes) return;
+  const eraDeCamara = antes.alarma_sensor === 'camara';
+  const apagarSalida = s.encendioSalida && antes.actuador_activo;
+  if (!eraDeCamara && !apagarSalida) return;
+  await pool.query(
+    `UPDATE estado_vivienda
+        SET alarma_activa = CASE WHEN $2 THEN false ELSE alarma_activa END,
+            alarma_motivo = CASE WHEN $2 THEN NULL ELSE alarma_motivo END,
+            alarma_sensor = CASE WHEN $2 THEN NULL ELSE alarma_sensor END,
+            actuador_activo = CASE WHEN $3 THEN false ELSE actuador_activo END,
+            actualizado_en = NOW()
+      WHERE vivienda_id = $1`, [viviendaId, eraDeCamara, apagarSalida]);
+  if (apagarSalida) await registrarAccion(viviendaId, 'salida_audible', true, false, 'camara');
+  if (eraDeCamara) await registrarAccion(viviendaId, 'alarma_terminada', true, false, 'camara');
+}
+
+// Al arrancar: una alarma de la camara que seguia sonando cuando se reinicio el servidor ya no tiene temporizador
+async function recuperarAlarmasCamara() {
+  const r = await pool.query(
+    `UPDATE estado_vivienda SET alarma_activa = false, alarma_motivo = NULL, alarma_sensor = NULL, actuador_activo = false, actualizado_en = NOW()
+      WHERE alarma_sensor = 'camara' RETURNING vivienda_id`);
+  for (const f of r.rows) {
+    await registrarAccion(f.vivienda_id, 'alarma_terminada', true, false, 'camara (reinicio del servidor)');
+    console.log(`Alarma por camara apagada al reiniciar: ${f.vivienda_id}`);
+  }
+}
+
+/*
  * GET /estado
  * Lo consultan tanto el concentrador como la aplicacion.
  * El concentrador lo usa para decidir si un evento debe disparar la sirena.
@@ -809,9 +898,21 @@ app.post('/estado', async (req, res) => {
 
     const nuevoArmado = armado !== undefined ? armado : previo.armado;
     const nuevoSilencio = modo_silencioso !== undefined ? modo_silencioso : previo.modo_silencioso;
-    const nuevoActuador = actuador_activo !== undefined ? actuador_activo : previo.actuador_activo;
+    let nuevoActuador = actuador_activo !== undefined ? actuador_activo : previo.actuador_activo;
     // Desarmar el sistema tambien apaga la alarma que estuviera sonando
     const nuevaAlarma = (alarma_activa === false || nuevoArmado === false) ? false : previo.alarma_activa;
+
+    // Si la que suena es una alarma de la camara, apagarla (o desarmar) tambien apaga la salida que ella encendio
+    let apagoSalidaCamara = false;
+    const deCamara = sirenasCamara.get(vivienda_id);
+    if (deCamara && nuevaAlarma === false) {
+      clearTimeout(deCamara.temporizador);
+      sirenasCamara.delete(vivienda_id);
+      if (deCamara.encendioSalida && actuador_activo === undefined && previo.actuador_activo) {
+        nuevoActuador = false;
+        apagoSalidaCamara = true;
+      }
+    }
 
     const r = await pool.query(
       `UPDATE estado_vivienda
@@ -837,6 +938,9 @@ app.post('/estado', async (req, res) => {
     }
     if (alarma_activa === false && previo.alarma_activa) {
       await registrarAccion(vivienda_id, 'apagar_alarma', true, false, usuario);
+    }
+    if (apagoSalidaCamara) {
+      await registrarAccion(vivienda_id, 'salida_audible', true, false, usuario);
     }
 
     console.log(`Estado actualizado: ${vivienda_id} -> armado=${nuevoArmado} silencioso=${nuevoSilencio} salida=${nuevoActuador} alarma=${nuevaAlarma}`);
@@ -1187,7 +1291,8 @@ inicializarEsquema()
   .then(migrarSensoresAntiguos)
   .then(iniciarPush)
   .then(() => camara.iniciar())
-  .then(() => eventosCamara.iniciar({ notificar, solicitarFoto: camara.solicitarFotoAlarma }))
+  .then(recuperarAlarmasCamara)
+  .then(() => eventosCamara.iniciar({ notificar, solicitarFoto: camara.solicitarFotoAlarma, activarAlarma: activarAlarmaCamara }))
   .then(() => {
     setInterval(vigilarDispositivos, 30000).unref();
     app.listen(PUERTO, () => {

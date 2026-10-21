@@ -13,8 +13,12 @@
  *   - Solo AVISAN las personas (ONVIF_ALERTAR=persona). El movimiento se registra.
  *   - Solo avisa con el sistema armado (ONVIF_SOLO_ARMADO=1): con alguien en casa
  *     una persona en el encuadre es lo normal.
- *   - NUNCA activa la sirena ni cambia el estado de la alarma. Es un registro y un
- *     aviso; que una deteccion dispare la sirena requeriria una politica explicita.
+ *   - NO activa la sirena. Solo si se pide con ONVIF_SIRENA=movimiento (o persona) y
+ *     el sistema esta armado: entonces se marca la alarma y suena la salida audible
+ *     por ONVIF_SIRENA_S segundos (ver activarAlarmaCamara en server.js). Una persona
+ *     cuenta tambien como movimiento. Con ONVIF_SIRENA vacio nunca toca la alarma.
+ *   - Retardo de salida: los primeros ONVIF_RETARDO_SALIDA_S segundos despues de armar
+ *     no se avisa ni suena nada, para no disparar la alarma con el residente saliendo.
  *
  * Sin ONVIF_ACTIVO=1 este modulo no hace nada.
  */
@@ -45,6 +49,10 @@ function leerConfig(env = process.env) {
     suscripcionS: num(env.ONVIF_SUSCRIPCION_S, 60),
     esperaS: num(env.ONVIF_LONGPOLL_S, 20),
     alertar: alertar.filter((x) => ['persona', 'movimiento'].includes(x)),
+    sirena: String(env.ONVIF_SIRENA || '').split(',').map((x) => x.trim()).filter((x) => ['persona', 'movimiento'].includes(x)),
+    sirenaS: num(env.ONVIF_SIRENA_S, 30),
+    retardoSalidaS: Number.isFinite(Number(env.ONVIF_RETARDO_SALIDA_S)) && Number(env.ONVIF_RETARDO_SALIDA_S) >= 0 && env.ONVIF_RETARDO_SALIDA_S !== ''
+      ? Number(env.ONVIF_RETARDO_SALIDA_S) : 60,
     soloArmado: !(env.ONVIF_SOLO_ARMADO === '0' || env.ONVIF_SOLO_ARMADO === 'false'),
     logXml: env.ONVIF_LOG_XML || '',
     diasEventos: num(env.ONVIF_EVENTOS_DIAS, 30)
@@ -63,7 +71,7 @@ let cfgActual = null;
  * Arranca el servicio. Recibe del backend lo que necesita para avisar y pedir la foto,
  * en vez de importarlo, para no depender de server.js.
  */
-function iniciar({ notificar, solicitarFoto, config = leerConfig(), consulta = pool }) {
+function iniciar({ notificar, solicitarFoto, activarAlarma = null, config = leerConfig(), consulta = pool }) {
   cfgActual = config;
   if (!config.activo) {
     console.log('Eventos ONVIF desactivados (ONVIF_ACTIVO no es 1).');
@@ -107,18 +115,34 @@ function iniciar({ notificar, solicitarFoto, config = leerConfig(), consulta = p
     }
   });
 
-  async function marcarAlerta(a, nota) {
+  // alerta: si el evento llego a avisar al residente (por omision, cuando no hay nota que explique por que no)
+  async function marcarAlerta(a, nota, alerta = nota === null) {
     const id = await ultimoEvento.get(`${a.camaraId}|${a.detector}`);
-    if (id) await consulta.query('UPDATE eventos_camara SET alerta = $2, nota = $3 WHERE id = $1', [id, nota === null, nota]);
+    if (id) await consulta.query('UPDATE eventos_camara SET alerta = $2, nota = $3 WHERE id = $1', [id, alerta, nota]);
   }
 
   async function decidirAviso(a) {
-    if (!config.alertar.includes(a.detector)) { await marcarAlerta(a, 'solo registrado por la politica'); return; }
-    if (config.soloArmado) {
+    // Una persona implica movimiento: si la sirena esta pedida para el movimiento, la persona tambien suena.
+    // (El motor descarta el aviso de movimiento cuando llega una persona, y sin esto el intruso no sonaria.)
+    const suena = Boolean(activarAlarma) && (config.sirena.includes(a.detector) || (a.detector === 'persona' && config.sirena.includes('movimiento')));
+    if (!suena && !config.alertar.includes(a.detector)) { await marcarAlerta(a, 'solo registrado por la politica'); return; }
+    if (suena || config.soloArmado) {
       const r = await consulta.query('SELECT armado FROM estado_vivienda WHERE vivienda_id = $1', [config.viviendaId]);
       if (!r.rowCount || !r.rows[0].armado) { await marcarAlerta(a, 'sistema desarmado'); return; }
     }
+    if (config.retardoSalidaS > 0) {
+      const r = await consulta.query(
+        `SELECT 1 FROM acciones WHERE vivienda_id = $1 AND accion = 'armar' AND valor_nuevo = 'true'
+            AND creado_en > NOW() - ($2 || ' seconds')::interval LIMIT 1`, [config.viviendaId, String(config.retardoSalidaS)]);
+      if (r.rowCount) { await marcarAlerta(a, 'retardo de salida'); return; }
+    }
     const t = TEXTOS[a.detector];
+    if (suena) {
+      const r = await activarAlarma(config.viviendaId, t.cuerpo, config.sirenaS);
+      if (r && r.avisado) await marcarAlerta(a, 'activo la alarma', true);
+      else await marcarAlerta(a, (r && r.nota) || 'no se activo la alarma', false);
+      return;
+    }
     notificar(config.viviendaId, t.titulo, `${t.cuerpo}.`, 4, t.etiquetas);
     // La foto usa el mecanismo de evidencias existente; no bloquea ni falla el aviso
     solicitarFoto(config.viviendaId, t.cuerpo, null, { usuario: 'evento' });
@@ -142,7 +166,8 @@ function iniciar({ notificar, solicitarFoto, config = leerConfig(), consulta = p
   setInterval(limpiar, 3600000).unref();
 
   console.log(`Eventos ONVIF activos: camara "${config.camaraId}" en ${config.host}:${config.puerto}, vivienda "${config.viviendaId}". ` +
-    `Avisan: ${config.alertar.join(', ') || 'nada'}${config.soloArmado ? ' (solo con el sistema armado)' : ''}.`);
+    `Avisan: ${config.alertar.join(', ') || 'nada'}${config.soloArmado ? ' (solo con el sistema armado)' : ''}. ` +
+    `Sirena: ${activarAlarma && config.sirena.length ? `${config.sirena.join(', ')} durante ${config.sirenaS} s` : 'no'}. Retardo de salida: ${config.retardoSalidaS} s.`);
   return servicio;
 }
 
@@ -174,7 +199,8 @@ function montarRutas(app) {
       ok: true, activa: true, conectado: e.conectado,
       persona: e.motor.persona, movimiento: e.motor.movimiento,
       ultimo_mensaje: e.ultimoMensajeMs ? new Date(e.ultimoMensajeMs).toISOString() : null,
-      reconexiones: Math.max(0, e.conexiones - 1), errores: e.errores
+      reconexiones: Math.max(0, e.conexiones - 1), errores: e.errores,
+      politica: { alertar: cfgActual.alertar, sirena: cfgActual.sirena, sirena_s: cfgActual.sirenaS, retardo_salida_s: cfgActual.retardoSalidaS }
     });
   });
 }

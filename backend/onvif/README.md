@@ -2,7 +2,7 @@
 
 El backend se suscribe a los eventos ONVIF de la Mercusys MC210 (persona y movimiento
 que la propia camara ya calcula) y los convierte en eventos guardados, avisos y fotos.
-No analiza video, no hay IA adicional y **no activa la sirena ni cambia el estado de la alarma**.
+No analiza video y no hay IA adicional. Por omision **no activa la sirena ni cambia el estado de la alarma**; solo si se define `ONVIF_SIRENA` (ver mas abajo).
 
 ```
 MC210 --(PullPoint, long poll)--> servicio.js --> estados.js --> eventos_camara.js
@@ -36,6 +36,9 @@ Todo viene apagado por omision.
 | `ONVIF_HOST` / `ONVIF_PUERTO` | `10.8.0.2` / `2020` | Direccion alcanzable de la camara (extremo del tunel) |
 | `ONVIF_USUARIO` / `ONVIF_CLAVE` | | cuenta de la camara. Solo en el `.env` del servidor |
 | `ONVIF_ALERTAR` | `persona` | detectores que avisan: `persona`, `movimiento` o ambos |
+| `ONVIF_SIRENA` | vacio | `movimiento` y/o `persona`: con la casa armada, la deteccion marca la alarma y enciende la salida audible. Vacio = nunca suena |
+| `ONVIF_SIRENA_S` | `30` | segundos que suena |
+| `ONVIF_RETARDO_SALIDA_S` | `60` | tras armar, la camara no avisa ni suena durante estos segundos |
 | `ONVIF_SOLO_ARMADO` | `1` | solo avisa con el sistema armado (siempre se registra el evento) |
 | `ONVIF_LOG_XML` | vacio | ruta del registro XML original (sin credenciales) |
 | `CAMARA_RTSP_ACTIVO` | `0` | enciende el agente de fotos/video bajo demanda |
@@ -69,9 +72,26 @@ Los demas ajustes (cooldowns, ventana de sincronizacion, duracion de la suscripc
 4. Si todo cuadra, en `deploy/.env`: `ONVIF_ACTIVO=1`, `ONVIF_VIVIENDA_ID`, usuario y clave, `CAMARA_RTSP_ACTIVO=1`;
    reconstruye (`docker compose up -d --build backend`) y mira `docker logs alarma_backend`.
 
+## Alarma disparada por la camara
+
+Con `ONVIF_SIRENA=movimiento`, un movimiento detectado con la casa **armada** (y pasado el retardo de salida)
+marca la alarma, avisa con prioridad maxima, pide fotos y enciende la salida audible durante `ONVIF_SIRENA_S`.
+
+- **Una persona cuenta como movimiento.** Si no, el motor descartaria el movimiento cuando llega una persona y
+  el intruso no haria sonar nada.
+- **Como suena:** la sirena la decide localmente el concentrador cuando un nodo le avisa; el servidor solo refleja
+  ese estado. Para la camara se usa lo unico que el concentrador obedece del servidor: la salida audible
+  (`actuador_activo`). El concentrador consulta el estado cada pocos segundos, asi que tarda ese intervalo en sonar.
+- **Se apaga:** sola al cumplirse el tiempo; al apagar la alarma desde la aplicacion; al desarmar; y si el servidor
+  se reinicia mientras suena (la alarma queda marcada como de la camara y al arrancar se apaga).
+- **Modo silencioso:** igual que con un sensor, registra y avisa pero no enciende la salida.
+- **Si ya hay una alarma sonando** (por ejemplo de un sensor), no se duplica.
+- **Falsas alarmas:** el movimiento de la MC210 es muy sensible (luz, sombras, cortinas). Ajusta la sensibilidad y
+  la zona de deteccion en la aplicacion de la camara, y valora usar `persona` en lugar de `movimiento`.
+
 ## Pruebas
 
-`npm test` (39 pruebas, ~45 s). Usan una camara ONVIF simulada (`test/camara_onvif_falsa.js`),
+`npm test` (51 pruebas, ~1.5 min). Usan una camara ONVIF simulada (`test/camara_onvif_falsa.js`),
 ffmpeg con una fuente de prueba y, en la de extremo a extremo, PostgreSQL en memoria (PGlite).
 
 Cubren: sincronizacion inicial sin alertas, cambios reales, repetidos, cooldown, desconocido al

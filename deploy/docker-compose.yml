@@ -71,7 +71,7 @@ services:
       CAMARA_RAFAGA: ${CAMARA_RAFAGA:-3}
       # Camara Mercusys MC210 por el tunel WireGuard (ver firmware/puente_camara_s3).
       # Todo esto queda DESACTIVADO mientras ONVIF_ACTIVO y CAMARA_RTSP_ACTIVO no valgan 1.
-      # Eventos de personas y movimiento por ONVIF: solo registran y avisan, nunca activan la sirena.
+      # Eventos de personas y movimiento por ONVIF: registran y avisan; solo suenan la alarma si se define ONVIF_SIRENA.
       ONVIF_ACTIVO: ${ONVIF_ACTIVO:-0}
       ONVIF_VIVIENDA_ID: ${ONVIF_VIVIENDA_ID:-}
       ONVIF_CAMARA_ID: ${ONVIF_CAMARA_ID:-mc210}
@@ -81,6 +81,12 @@ services:
       ONVIF_CLAVE: ${ONVIF_CLAVE:-}
       ONVIF_ALERTAR: ${ONVIF_ALERTAR:-persona}
       ONVIF_SOLO_ARMADO: ${ONVIF_SOLO_ARMADO:-1}
+      # Alarma por la camara: vacio = nunca suena (solo registra y avisa). Con "movimiento", un movimiento
+      # (o una persona) con la casa armada marca la alarma y enciende la salida audible ONVIF_SIRENA_S segundos.
+      ONVIF_SIRENA: ${ONVIF_SIRENA:-}
+      ONVIF_SIRENA_S: ${ONVIF_SIRENA_S:-30}
+      # Segundos despues de armar en los que la camara no avisa ni suena (para poder salir de casa)
+      ONVIF_RETARDO_SALIDA_S: ${ONVIF_RETARDO_SALIDA_S:-60}
       ONVIF_COOLDOWN_PERSONA_S: ${ONVIF_COOLDOWN_PERSONA_S:-60}
       ONVIF_COOLDOWN_MOVIMIENTO_S: ${ONVIF_COOLDOWN_MOVIMIENTO_S:-120}
       ONVIF_LOG_XML: ${ONVIF_LOG_XML:-}

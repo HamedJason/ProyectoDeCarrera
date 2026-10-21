@@ -502,6 +502,24 @@
   .hoja .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .hoja .grid2 .boton { padding: 13px 10px; font-size: 16px; }
 
+  /* ---- Deteccion de la camara ---- */
+  .det { margin-top: 16px; }
+  .det-estado { font-size: 13px; color: var(--tinta-2); }
+  .det-estado b { color: var(--tinta); font-weight: 700; }
+  .eventos { list-style: none; margin: 6px 0 0; padding: 0; }
+  .eventos li { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--linea); }
+  .eventos li:last-child { border-bottom: none; }
+  .eventos .punto { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; background: var(--yeso); border: 2px solid var(--tinta-2); }
+  .eventos .persona .punto { background: var(--ambar); border-color: var(--ambar); }
+  .eventos .alarma .punto { background: var(--sirena); border-color: var(--sirena); }
+  .eventos .cuerpo { min-width: 0; flex: 1; }
+  .eventos .que { font-weight: 600; font-size: 15px; }
+  .eventos .cuando { font-size: 13px; color: var(--tinta-2); font-variant-numeric: tabular-nums; }
+  .eventos .etiqueta { font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 99px; background: var(--yeso); color: var(--tinta-2); white-space: nowrap; }
+  .eventos .avisado .etiqueta { background: var(--pino-claro); color: var(--pino); }
+  .eventos .alarma .etiqueta { background: var(--sirena-claro); color: var(--sirena); }
+  .eventos .vacio { color: var(--tinta-2); font-size: 14px; padding: 8px 0; }
+
   /* ---- Camara ---- */
   .camara-botones { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
   .camara-botones .nota { font-size: 13px; color: var(--tinta-2); }
@@ -653,6 +671,12 @@
       <button class="boton-texto" id="boton-foto" onclick="solicitarFoto()">Tomar foto</button>
       <button class="boton-texto" id="boton-vivo" onclick="abrirVivo()">Ver en vivo</button>
       <span class="nota" id="camara-nota"></span>
+    </div>
+    <div class="det" id="det" hidden>
+      <h3 class="det-titulo" style="margin:0 0 2px;font-size:16px">Detección de la cámara</h3>
+      <div class="det-estado" id="det-estado"></div>
+      <ul class="eventos" id="eventos"></ul>
+      <button class="boton-texto" id="boton-mas-eventos" onclick="verMasEventos()" hidden style="margin-top:8px">Ver más eventos</button>
     </div>
     <div class="galeria" id="galeria"></div>
     <button class="boton-texto" id="boton-mas-fotos" onclick="verMasFotos()" hidden style="margin-top:10px">Ver más fotos</button>
@@ -1870,7 +1894,7 @@ function fijarVivienda(id) {
 // Limpia lo que pertenecia a la vivienda anterior para no mezclar datos
 function reiniciarVistas() {
   estado = { armado: false, modo_silencioso: false, actuador_activo: false, alarma_activa: false };
-  sensores = []; nodos = []; fotos = []; camara = null; limiteFotos = 12; llaveGaleria = '';
+  sensores = []; nodos = []; fotos = []; camara = null; deteccion = null; eventosCamara = []; limiteEventos = 6; limiteFotos = 12; llaveGaleria = '';
   for (const el of tarjetas.values()) el.remove();
   tarjetas.clear();
   primeraCarga = true;
@@ -1878,6 +1902,7 @@ function reiniciarVistas() {
   $('lista').innerHTML = '<li class="cargando">Consultando el servidor</li>';
   $('galeria').innerHTML = '';
   $('grupo-camara').hidden = true;
+  $('det').hidden = true;
   $('grupo-contactos').hidden = true; $('grupo-movimiento').hidden = true; $('sin-sensores').hidden = true;
   for (const b of ['banda-hub', 'banda-nodos', 'banda-nuevos']) $(b).hidden = true;
   $('titular').textContent = 'Consultando la casa';
@@ -2133,6 +2158,9 @@ function revisarNuevos() {
 // ===================== Cámara =====================
 
 let camara = null;
+let deteccion = null;      // estado de la deteccion ONVIF ({ activa: false } si el servidor no la usa)
+let eventosCamara = [];    // eventos que guarda el servidor (persona y movimiento detectados por la propia camara)
+let limiteEventos = 6;
 let fotos = [];
 let limiteFotos = 12;
 let llaveGaleria = '';
@@ -2143,13 +2171,19 @@ async function refrescarCamara() {
   const casa = VIVIENDA;
   try {
     const q = encodeURIComponent(VIVIENDA);
-    const [c, f] = await Promise.all([
+    // La deteccion es opcional: si el servidor no la tiene o falla, la pagina sigue igual
+    const opcional = (p) => p.catch((e) => { if (e instanceof ErrorSesion) throw e; return null; });
+    const [c, f, ev, det] = await Promise.all([
       pedir('/camara/estado?vivienda_id=' + q),
-      pedir('/fotos?vivienda_id=' + q + '&limite=' + limiteFotos)
+      pedir('/fotos?vivienda_id=' + q + '&limite=' + limiteFotos),
+      opcional(pedir('/camara/eventos?vivienda_id=' + q + '&limite=100')),
+      opcional(pedir('/camara/deteccion?vivienda_id=' + q))
     ]);
     if (casa !== VIVIENDA) return;
     camara = c;
     fotos = f && f.fotos ? f.fotos : [];
+    eventosCamara = ev && ev.eventos ? ev.eventos : [];
+    deteccion = det && det.ok ? det : null;
     pintarCamara();
   } catch (e) { /* la cámara es opcional: un fallo no debe molestar */ }
 }
@@ -2171,7 +2205,74 @@ function pintarCamara() {
       '<span class="sello">' + esc(formatearFecha(f.creado_en)) + '</span></button>').join('');
   }
   $('boton-mas-fotos').hidden = fotos.length < limiteFotos;
+  pintarDeteccion();
 }
+
+// Cada paso frente a la camara genera varios eventos seguidos del mismo tipo: se agrupan los que
+// ocurren con menos de un minuto de diferencia, y solo se cuentan las "subidas" (el inicio de cada deteccion).
+function agruparEventos(lista) {
+  const grupos = [];
+  for (const e of lista) {
+    if (e.transicion !== 'subida') continue;
+    const g = grupos[grupos.length - 1];
+    if (g && g.detector === e.detector && new Date(g.masAntiguo) - new Date(e.creado_en) < 60000) {
+      g.n++; g.masAntiguo = e.creado_en;
+      if (e.alerta) { g.alerta = true; g.nota = e.nota === 'activo la alarma' || g.nota === 'activo la alarma' ? 'activo la alarma' : g.nota; }
+    } else {
+      grupos.push({ detector: e.detector, t: e.creado_en, masAntiguo: e.creado_en, n: 1, alerta: !!e.alerta, nota: e.nota || null });
+    }
+  }
+  return grupos;
+}
+
+function etiquetaEvento(g) {
+  if (g.nota === 'activo la alarma') return ['Activó la alarma', 'alarma'];
+  if (g.alerta) return ['Avisó', 'avisado'];
+  const notas = {
+    'sistema desarmado': 'Casa desarmada',
+    'solo registrado por la politica': 'Solo registrado',
+    'retardo de salida': 'Retardo de salida',
+    'ya habia una alarma activa': 'Ya sonaba la alarma'
+  };
+  return [notas[g.nota] || 'Solo registrado', ''];
+}
+
+function pintarDeteccion() {
+  const grupos = agruparEventos(eventosCamara);
+  const activa = !!(deteccion && deteccion.activa);
+  $('det').hidden = !activa && !grupos.length;
+  if (!activa && !grupos.length) return;
+
+  let estado = '';
+  if (activa) {
+    const nombres = { persona: 'persona', movimiento: 'movimiento' };
+    const lista = (l) => l.map((x) => nombres[x] || x).join(' y ');
+    if (!deteccion.conectado) {
+      estado = '<b>Sin conexión con la detección de la cámara.</b> Se reintenta sola.';
+    } else {
+      const ahora = [];
+      if (deteccion.persona === true) ahora.push('persona');
+      if (deteccion.movimiento === true) ahora.push('movimiento');
+      estado = ahora.length ? 'Ahora detecta: <b>' + ahora.join(' y ') + '</b>. ' : 'Detección activa, sin nada en el encuadre. ';
+    }
+    const pol = deteccion.politica || {};
+    if (pol.sirena && pol.sirena.length) estado += ' La alarma suena por ' + lista(pol.sirena) + ' (con la casa armada).';
+    else if (pol.alertar && pol.alertar.length) estado += ' Avisa por ' + lista(pol.alertar) + ' (con la casa armada).';
+  }
+  $('det-estado').innerHTML = estado;
+
+  const visibles = grupos.slice(0, limiteEventos);
+  $('eventos').innerHTML = visibles.length ? visibles.map((g) => {
+    const [texto, clase] = etiquetaEvento(g);
+    const que = g.detector === 'persona' ? 'Persona detectada' : 'Movimiento detectado';
+    return '<li class="' + esc(g.detector) + ' ' + esc(clase) + '"><span class="punto"></span>' +
+      '<div class="cuerpo"><div class="que">' + que + (g.n > 1 ? ' <span class="cuando">×' + g.n + '</span>' : '') + '</div>' +
+      '<div class="cuando">' + esc(formatearFecha(g.t)) + '</div></div>' +
+      '<span class="etiqueta">' + esc(texto) + '</span></li>';
+  }).join('') : '<li class="vacio">Todavía no se detecta nada. Cuando la cámara vea una persona o movimiento, aparecerá aquí.</li>';
+  $('boton-mas-eventos').hidden = grupos.length <= limiteEventos;
+}
+function verMasEventos() { limiteEventos += 10; pintarDeteccion(); }
 $('galeria').addEventListener('click', (ev) => {
   const b = ev.target.closest('button[data-id]');
   if (b) abrirFoto(Number(b.dataset.id));
