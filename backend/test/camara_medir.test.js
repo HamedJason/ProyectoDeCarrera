@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { execFileSync } = require('child_process');
-const { medirUna, recomendar } = require('../camara_medir');
+const { medirUna, medirOrigen, recomendar } = require('../camara_medir');
 const { leerConfig } = require('../camara_rtsp');
 
 const hayFfmpeg = (() => { try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); return true; } catch (e) { return false; } })();
@@ -33,12 +33,28 @@ test('medirUna: si ffmpeg no consigue leer, devuelve el error sin mostrar la cla
   assert.ok(!r.error.includes('secreta'));
 });
 
+test('medirOrigen: mide los kbit/s que cruzan el tunel sin decodificar', { skip: !hayFfmpeg }, async () => {
+  const os = require('os'), path = require('path'), fs = require('fs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'orig-'));
+  const mp4 = path.join(dir, 'v.mp4');
+  try {
+    execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=10', '-t', '2', '-c:v', 'libx264', '-preset', 'ultrafast', mp4]);
+  } catch (e) { return; }   // sin libx264 no hay con que probar
+  const r = await medirOrigen(cfg, { segundos: 3, entrada: () => ['-re', '-stream_loop', '-1', '-i', mp4] });
+  assert.ok(!r.error, r.error);
+  assert.ok(r.kbitPromedio > 0 && r.kbitMaximo >= r.kbitPromedio && r.kbitMinimo <= r.kbitPromedio);
+  const malo = await medirOrigen(cfg, { segundos: 3, entrada: () => ['-i', 'rtsp://u:secreta@127.0.0.1:9/stream2'] });
+  assert.ok(malo.error && !malo.error.includes('secreta'));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('recomendar: el mayor fps que se cumple al 90 %, sin pasar el limite de tamano ni el caudal', () => {
   const p = [
     { fps: 4, cuadros: 40, fpsReales: 4, sobreLimite: 0, kbPorSegundo: 100 },
     { fps: 10, cuadros: 100, fpsReales: 9.8, sobreLimite: 0, kbPorSegundo: 250 },
     { fps: 15, cuadros: 100, fpsReales: 9.1, sobreLimite: 0, kbPorSegundo: 250 },      // no llega: el tunel no da mas
-    { fps: 20, cuadros: 100, fpsReales: 20, sobreLimite: 3, kbPorSegundo: 400 }        // cuadros demasiado grandes
+    { fps: 20, cuadros: 100, fpsReales: 20, sobreLimite: 3, kbPorSegundo: 400 },       // cuadros demasiado grandes
+    { fps: 25, cuadros: 100, fpsReales: 31, sobreLimite: 0, kbPorSegundo: 400 }        // cuadros duplicados: no es real
   ];
   assert.equal(recomendar(p), 10);
   assert.equal(recomendar([{ fps: 25, cuadros: 100, fpsReales: 25, sobreLimite: 0, kbPorSegundo: 900 }]), null);

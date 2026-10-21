@@ -78,9 +78,44 @@ function medirUna(cfg, { fps = 0, segundos = 10, ruta = cfg.rutaVivo, ancho = cf
   });
 }
 
+/**
+ * Mide lo que de verdad cruza el tunel: el video de la camara SIN decodificar (-c copy), contando los bytes
+ * que llegan cada segundo. Con movimiento el bitrate sube y es ahi donde el tunel se satura y se traba.
+ * Devuelve el promedio, el mejor y el peor segundo (kbit/s) y cuantos segundos no llego nada.
+ */
+function medirOrigen(cfg, { segundos = 15, ruta = cfg.rutaVivo, entrada = null } = {}) {
+  return new Promise((resolver) => {
+    const entradaArgs = entrada ? entrada(ruta) : entradaRtsp(cfg, ruta);
+    const args = ['-nostdin', '-hide_banner', '-loglevel', 'error', ...entradaArgs, '-an', '-c:v', 'copy', '-f', 'mpegts', 'pipe:1'];
+    const p = spawn(cfg.ffmpeg, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let err = '', t0 = 0, total = 0;
+    const cubos = [];
+    p.stderr.on('data', (d) => { if (err.length < 5000) err += d; });
+    p.stdout.on('data', (d) => {
+      const ahora = Date.now();
+      if (!t0) { t0 = ahora; reloj = setTimeout(() => p.kill('SIGKILL'), segundos * 1000); }
+      const i = Math.floor((ahora - t0) / 1000);
+      cubos[i] = (cubos[i] || 0) + d.length; total += d.length;
+    });
+    let reloj = setTimeout(() => p.kill('SIGKILL'), (segundos + 25) * 1000);
+    p.on('error', (e) => { err += e.message; });
+    p.on('close', () => {
+      clearTimeout(reloj);
+      const n = Math.max(1, Math.min(segundos, cubos.length));
+      const kbit = Array.from({ length: n }, (_, i) => ((cubos[i] || 0) * 8) / 1000);
+      const r = {
+        segundos: n, kbitPromedio: total * 8 / 1000 / n, kbitMaximo: Math.max(...kbit), kbitMinimo: Math.min(...kbit),
+        segundosSinDatos: kbit.filter((k) => k === 0).length, error: null
+      };
+      if (!total) r.error = (err.trim().split('\n').pop() || 'ffmpeg no entrego datos').split(cfg.clave).join('***');
+      resolver(r);
+    });
+  });
+}
+
 /** Elige el valor mas alto probado que se cumple de verdad y con margen para el caudal. */
 function recomendar(pruebas, maxKBs = 600) {
-  const buenas = pruebas.filter((x) => x.fps > 0 && x.cuadros > 2 && x.fpsReales >= x.fps * 0.9 && x.sobreLimite === 0 && x.kbPorSegundo <= maxKBs);
+  const buenas = pruebas.filter((x) => x.fps > 0 && x.cuadros > 2 && x.fpsReales >= x.fps * 0.9 && x.fpsReales <= x.fps * 1.15 && x.sobreLimite === 0 && x.kbPorSegundo <= maxKBs);
   return buenas.length ? buenas[buenas.length - 1].fps : null;
 }
 
@@ -94,13 +129,20 @@ async function principal() {
   if (!entrada && !(await alcanzable(cfg.host, cfg.puerto))) { console.error(`No se alcanza ${cfg.host}:${cfg.puerto}. Revisa el tunel (verificar_puente.sh).`); process.exit(1); }
 
   console.log(`Camara ${cfg.host}:${cfg.puerto}, flujo "${ruta}", ancho ${ancho}, ${segundos} s por prueba. Mueve algo frente a la camara durante la medicion.\n`);
+  const o = await medirOrigen(cfg, { segundos: Math.max(segundos, 15), ruta, entrada });
+  if (!o.error) {
+    console.log(`Lo que cruza el tunel (video de la camara sin decodificar, ${o.segundos} s): promedio ${o.kbitPromedio.toFixed(0)} kbit/s, ` +
+      `mejor segundo ${o.kbitMaximo.toFixed(0)}, peor ${o.kbitMinimo.toFixed(0)}, segundos sin datos: ${o.segundosSinDatos}.`);
+    console.log('  (mide con movimiento: si el maximo se dispara o hay segundos sin datos, el tunel es el cuello de botella)\n');
+  }
   const filas = [];
   const base = await medirUna(cfg, { fps: 0, segundos, ruta, ancho, entrada });
   if (base.error) { console.error(`No se pudo leer el flujo: ${base.error}`); process.exit(1); }
   console.log(`Flujo sin limite: ${base.origen || '(sin datos del flujo)'}; llegan ${base.fpsReales.toFixed(1)} cuadros/s por el tunel, ` +
     `${base.kbPorCuadro.toFixed(1)} KB por cuadro (maximo ${(base.maxBytes / 1024).toFixed(1)} KB).\n`);
 
-  const objetivos = [4, 8, 10, 12, 15, 20, 25].filter((f) => f <= Math.ceil(base.fpsReales * 1.05));
+  // Pedir mas fps de los que llegan solo duplica cuadros: no se prueba
+  const objetivos = [4, 8, 10, 12, 15, 20, 25].filter((f) => f <= Math.floor(base.fpsReales));
   console.log('Objetivo | Reales | KB/cuadro | KB/s al telefono | Cuadros sobre el limite');
   console.log('---------+--------+-----------+------------------+------------------------');
   for (const f of objetivos) {
@@ -119,4 +161,4 @@ if (require.main === module) {
   principal().catch((e) => { console.error(e.message); process.exit(1); });
 }
 
-module.exports = { medirUna, recomendar };
+module.exports = { medirUna, medirOrigen, recomendar };
