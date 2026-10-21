@@ -42,7 +42,7 @@ class ServicioOnvif {
     this.corriendo = false;
     this.estadoInfo = {
       conectado: false, ultimaConexionMs: null, ultimoMensajeMs: null, ultimoErrorMs: null, ultimoError: null,
-      conexiones: 0, renovaciones: 0, cortesRecuperados: 0, errores: 0, mensajes: 0, topicsCamara: [], faltanTopics: []
+      conexiones: 0, renovaciones: 0, cortesRecuperados: 0, esperasVencidas: 0, errores: 0, mensajes: 0, topicsCamara: [], faltanTopics: []
     };
   }
 
@@ -137,7 +137,15 @@ class ServicioOnvif {
         // La camara a veces cierra el socket en mitad de una espera. La suscripcion sigue viva:
         // se repite la misma espera sin declarar la camara desconocida ni crear otra suscripcion.
         if (this.parar.signal.aborted) return;
-        if (!(e instanceof ErrorOnvif && e.transitorio) || ++cortes > 3) throw e;
+        if (!(e instanceof ErrorOnvif && e.transitorio)) throw e;
+        // La MC210 no contesta con una lista vacia cuando se agota la espera: cierra el socket.
+        // Si el corte llega justo al vencer el tiempo pedido, es una espera vacia normal.
+        if (this.ahora() - t0 >= this.cfg.esperaS * 1000 * 0.9) {
+          this.estadoInfo.esperasVencidas++;
+          cortes = 0;
+          continue;
+        }
+        if (++cortes > 3) throw e;
         this.estadoInfo.cortesRecuperados++;
         this.log('info', `La camara cerro la conexion (${e.causa}); se repite la espera (${cortes}/3).`);
         await esperar(300, this.parar.signal);

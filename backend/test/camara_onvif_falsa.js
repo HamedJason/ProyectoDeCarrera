@@ -25,6 +25,7 @@ function iniciarCamaraFalsa({ usuario = 'cam', clave = 'secreta', desfaseHoraMs 
     contadores: { crear: 0, extraer: 0, renovar: 0, cancelar: 0, autenticacionFallida: 0, direcciones: [] },
     xmlRecibidos: [],
     caida: false,
+    cortarAlVencer: false,           // como la MC210: al agotarse la espera cierra el socket en vez de responder vacio
     cortarPulls: 0                   // cierra el socket en las proximas N esperas (la suscripcion sigue viva)
   };
   let siguienteId = 1;
@@ -146,7 +147,7 @@ function iniciarCamaraFalsa({ usuario = 'cam', clave = 'secreta', desfaseHoraMs 
           responder(res, 200, `<tev:PullMessagesResponse><tev:CurrentTime>${new Date().toISOString()}</tev:CurrentTime><tev:TerminationTime>${new Date(sus.expira).toISOString()}</tev:TerminationTime>${lote.join('')}</tev:PullMessagesResponse>`);
         };
         if (sus.cola.length) return entregar();
-        const temporizador = setTimeout(() => { sus.esperando = null; entregar(); }, seg * 1000);
+        const temporizador = setTimeout(() => { sus.esperando = null; if (e.cortarAlVencer) return req.socket.destroy(); entregar(); }, seg * 1000);
         sus.esperando = () => { clearTimeout(temporizador); setTimeout(entregar, 5); };
         res.on('close', () => { clearTimeout(temporizador); if (sus.esperando) sus.esperando = null; });
         return undefined;

@@ -38,7 +38,7 @@ async function main() {
     process.exit(2);
   }
   const cliente = new ClienteOnvif({ host, puerto, usuario, clave, registroXml: crearRegistroXml(rutaXml, { secretos: [clave] }) });
-  const contadores = { consultas: 0, cortes: 0, cortesSeguidos: 0, mensajes: 0, operaciones: {}, valores: {} };
+  const contadores = { esperasVencidas: 0, consultas: 0, cortes: 0, cortesSeguidos: 0, mensajes: 0, operaciones: {}, valores: {} };
   const motor = new MotorEventos({
     cooldownPersonaMs: 60000, cooldownMovimientoMs: 120000, dedupMs: 3000, ventanaSyncMs: 5000,
     alEvento: (e) => linea(`  >> EVENTO  ${e.detector} ${e.transicion}`),
@@ -77,7 +77,14 @@ async function main() {
         msgs = await cliente.extraer(sus, { esperaS: Math.min(10, Math.max(1, Math.ceil((fin - Date.now()) / 1000))) });
         contadores.consultas++;
       } catch (e) {
-        if (!(e instanceof ErrorOnvif && e.transitorio) || contadores.cortesSeguidos >= 3) throw e;
+        if (!(e instanceof ErrorOnvif && e.transitorio)) throw e;
+        if (Date.now() - t0 >= Math.min(10, Math.max(1, Math.ceil((fin - t0) / 1000))) * 900) {
+          // Al agotarse la espera la camara cierra el socket en vez de contestar vacio: es normal
+          contadores.esperasVencidas++;
+          linea('  (sin novedades: la camara cerro la espera al vencer el tiempo; es normal en esta camara)');
+          continue;
+        }
+        if (contadores.cortesSeguidos >= 3) throw e;
         contadores.cortes++; contadores.cortesSeguidos++;
         linea(`  !! la camara cerro la conexion tras ${Date.now() - t0} ms (${e.causa}); se repite la espera (la suscripcion sigue viva)`);
         await new Promise((r) => setTimeout(r, 300));
@@ -99,7 +106,7 @@ async function main() {
   }
 
   console.log('\n===== Resumen =====');
-  console.log(`Mensajes recibidos: ${contadores.mensajes} en ${contadores.consultas} consultas; cortes de conexion recuperados: ${contadores.cortes}`);
+  console.log(`Mensajes recibidos: ${contadores.mensajes} en ${contadores.consultas} consultas; esperas vencidas sin novedades: ${contadores.esperasVencidas}; cortes inesperados recuperados: ${contadores.cortes}`);
   console.log('PropertyOperation vistas:', JSON.stringify(contadores.operaciones));
   console.log('Valores vistos:', JSON.stringify(contadores.valores));
   const est = motor.estado('probar');

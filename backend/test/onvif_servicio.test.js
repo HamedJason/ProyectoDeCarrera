@@ -201,3 +201,23 @@ test('si la camara cierra el socket en una espera, se repite sin perder la suscr
     assert.ok(!r.logs.some((l) => /perdida/.test(l)), 'se declaro perdida la conexion');
   } finally { await cerrar(); }
 });
+
+test('si la camara cierra el socket al agotarse cada espera (camara en reposo), no se pierde la conexion ni se reconecta', async () => {
+  const { camara, servicio, motor, r, cerrar } = await montar();
+  try {
+    assert.ok(await hasta(() => motor.estado('c1').persona === false));
+    camara.cortarAlVencer = true;
+    // Mas de 4 esperas vencidas seguidas: con el limite de 3 cortes seria un fallo si no se distinguieran
+    assert.ok(await hasta(() => servicio.estado().esperasVencidas >= 5, 9000), 'no se acumularon esperas vencidas');
+    const est = servicio.estado();
+    assert.equal(est.conexiones, 1, 'se reconecto');
+    assert.equal(est.errores, 0);
+    assert.equal(motor.estado('c1').conectado, true);
+    assert.equal(motor.estado('c1').persona, false);
+    assert.ok(!r.logs.some((l) => /perdida/.test(l)));
+    // Y al volver a haber eventos, siguen llegando
+    camara.cortarAlVencer = false;
+    camara.emitir({ tipo: 'persona', valor: true });
+    assert.ok(await hasta(() => r.eventos.some((e) => e.detector === 'persona' && e.transicion === 'subida'), 4000));
+  } finally { await cerrar(); }
+});
