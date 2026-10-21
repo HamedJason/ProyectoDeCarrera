@@ -3,7 +3,9 @@ const assert = require('node:assert/strict');
 const http = require('http');
 const net = require('net');
 const { execFileSync } = require('child_process');
-const { AgenteCamara, leerConfig } = require('../camara_rtsp');
+const { getEventListeners } = require('events');
+const { AgenteCamara, leerConfig, esperar: esperarAgente } = require('../camara_rtsp');
+const { esperar: esperarOnvif } = require('../onvif/servicio');
 const { iniciarCamaraFalsa } = require('./camara_onvif_falsa');
 const { MotorEventos } = require('../onvif/estados');
 const { ServicioOnvif } = require('../onvif/servicio');
@@ -169,4 +171,23 @@ test('los eventos ONVIF siguen llegando mientras hay una sesion de video bajo de
     assert.ok(await hasta(() => b.cuadros.length > antes), 'el video se detuvo al llegar el evento');
     assert.equal(servicio.estado().conexiones, 1);   // sin reconexiones por el video
   } finally { await servicio.detener(); await a.detener(); await camaraOnvif.cerrar(); await b.cerrar(); await cam.cerrar(); }
+});
+
+test('esperar no deja listeners pegados a la senal (evita MaxListenersExceededWarning en servicios de larga vida)', async () => {
+  for (const esperar of [esperarAgente, esperarOnvif]) {
+    const control = new AbortController();
+    for (let i = 0; i < 30; i++) await esperar(1, control.signal);
+    assert.equal(getEventListeners(control.signal, 'abort').length, 0);
+    // Y sigue respondiendo al aborto: sale al instante en vez de esperar todo el tiempo
+    const t0 = Date.now();
+    const p = esperar(5000, control.signal);
+    control.abort();
+    await p;
+    assert.ok(Date.now() - t0 < 500);
+    assert.equal(getEventListeners(control.signal, 'abort').length, 0);
+    // Con la senal ya abortada tampoco espera
+    const t1 = Date.now();
+    await esperar(5000, control.signal);
+    assert.ok(Date.now() - t1 < 500);
+  }
 });

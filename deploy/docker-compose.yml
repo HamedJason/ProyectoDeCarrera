@@ -85,7 +85,8 @@ services:
       ONVIF_COOLDOWN_MOVIMIENTO_S: ${ONVIF_COOLDOWN_MOVIMIENTO_S:-120}
       ONVIF_LOG_XML: ${ONVIF_LOG_XML:-}
       # Fotos y vista en vivo de la MC210 por RTSP, solo bajo demanda (ffmpeg corre unos segundos por tarea).
-      # Si la vivienda tiene token propio, CAMARA_TOKEN debe ser ese; si no, se usa DEVICE_TOKEN.
+      # CAMARA_TOKEN normalmente va vacio: el agente usa un token interno del propio servidor, que sirve
+      # aunque la vivienda tenga token propio. Solo se define si el agente corriera fuera del servidor.
       CAMARA_RTSP_ACTIVO: ${CAMARA_RTSP_ACTIVO:-0}
       CAMARA_TOKEN: ${CAMARA_TOKEN:-}
       RTSP_RUTA_FOTO: ${RTSP_RUTA_FOTO:-stream1}

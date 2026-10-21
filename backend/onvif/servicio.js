@@ -16,8 +16,11 @@ const { ClienteOnvif, ErrorOnvif } = require('./cliente');
 const TOPICS_ESPERADOS = ['RuleEngine/PeopleDetector/People', 'RuleEngine/CellMotionDetector/Motion'];
 
 const esperar = (ms, senal) => new Promise((res) => {
-  const t = setTimeout(res, ms);
-  if (senal) senal.addEventListener('abort', () => { clearTimeout(t); res(); }, { once: true });
+  if (senal && senal.aborted) return res();
+  // El listener se retira al terminar: si no, cada espera deja uno pegado a la senal (fuga)
+  const fin = () => { clearTimeout(t); if (senal) senal.removeEventListener('abort', fin); res(); };
+  const t = setTimeout(fin, ms);
+  if (senal) senal.addEventListener('abort', fin, { once: true });
 });
 
 class ServicioOnvif {
@@ -172,4 +175,4 @@ class ServicioOnvif {
   }
 }
 
-module.exports = { ServicioOnvif, TOPICS_ESPERADOS };
+module.exports = { ServicioOnvif, TOPICS_ESPERADOS, esperar };

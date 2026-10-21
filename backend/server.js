@@ -1193,7 +1193,8 @@ inicializarEsquema()
     app.listen(PUERTO, () => {
       console.log(`Backend escuchando en el puerto ${PUERTO}`);
       // El agente de la camara habla con este mismo servidor por 127.0.0.1, asi que arranca cuando ya escucha
-      camaraRtsp.iniciar();
+      // Sin CAMARA_TOKEN usa el token interno de este proceso: sirve aunque la vivienda tenga token propio
+      camaraRtsp.iniciar({ ...camaraRtsp.leerConfig(), token: process.env.CAMARA_TOKEN || auth.tokenInterno() });
     });
   })
   .catch((e) => {

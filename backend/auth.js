@@ -33,6 +33,13 @@ const MAX_VIVIENDAS_POR_USUARIO = 10;
 
 // ===================== Utilidades =====================
 
+// Token interno: lo genera el propio proceso al arrancar y solo vive en memoria. Lo usa el agente de la
+// camara (que corre dentro de este mismo servidor) para hablar con el por 127.0.0.1, de modo que no
+// necesita el token de la vivienda, del que el servidor solo guarda el resumen. Solo vale desde la
+// propia maquina y no sirve para nada mas que identificar a un dispositivo de una vivienda existente.
+const TOKEN_INTERNO = crypto.randomBytes(32).toString('hex');
+const esLoopback = (req) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket && req.socket.remoteAddress);
+
 const sha256 = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
 const aleatorio = (n) => crypto.randomBytes(n).toString('base64url');
 
@@ -232,6 +239,12 @@ function viviendaDeSolicitud(req) {
 async function autenticarDispositivo(req) {
   const token = req.header('X-Device-Token');
   if (!token) return null;
+  if (igualesSeguro(token, TOKEN_INTERNO) && esLoopback(req)) {
+    const id = limpiarTexto(viviendaDeSolicitud(req), 60);
+    if (!id) return null;
+    const v = await pool.query('SELECT 1 FROM viviendas WHERE id = $1', [id]);
+    return v.rowCount ? { viviendaId: id, global: false, interno: true } : null;
+  }
   const r = await pool.query('SELECT id FROM viviendas WHERE token_hash = $1', [sha256(token)]);
   if (r.rowCount) return { viviendaId: r.rows[0].id, global: false };
 
@@ -622,5 +635,6 @@ module.exports = {
   montarRutas, cargarSesion, verificarOrigen, requiereSesion,
   exigirMiembro, rolEn, viviendaDeSolicitud,
   autenticarDispositivo, rechazarDispositivo, quien, limpiarTexto,
-  sha256, REGISTRO_ABIERTO
+  sha256, REGISTRO_ABIERTO,
+  tokenInterno: () => TOKEN_INTERNO
 };

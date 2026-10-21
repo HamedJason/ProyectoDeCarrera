@@ -39,6 +39,7 @@ Todo viene apagado por omision.
 | `ONVIF_SOLO_ARMADO` | `1` | solo avisa con el sistema armado (siempre se registra el evento) |
 | `ONVIF_LOG_XML` | vacio | ruta del registro XML original (sin credenciales) |
 | `CAMARA_RTSP_ACTIVO` | `0` | enciende el agente de fotos/video bajo demanda |
+| `CAMARA_TOKEN` | vacio | normalmente vacio: el agente usa un token interno del servidor (no necesitas el token de la vivienda) |
 
 Los demas ajustes (cooldowns, ventana de sincronizacion, duracion de la suscripcion) estan en
 `deploy/.env.example`.
@@ -65,7 +66,7 @@ Los demas ajustes (cooldowns, ventana de sincronizacion, duracion de la suscripc
    - que aparezcan `RuleEngine/PeopleDetector/People` y `RuleEngine/CellMotionDetector/Motion`;
    - que al aparecer una persona salga `persona=true` y luego `persona=false` al irse;
    - que el motor diga `EVENTO` y `ALERTA` una sola vez por entrada, no por cada mensaje.
-4. Si todo cuadra, en `deploy/.env`: `ONVIF_ACTIVO=1`, `ONVIF_VIVIENDA_ID`, usuario y clave;
+4. Si todo cuadra, en `deploy/.env`: `ONVIF_ACTIVO=1`, `ONVIF_VIVIENDA_ID`, usuario y clave, `CAMARA_RTSP_ACTIVO=1`;
    reconstruye (`docker compose up -d --build backend`) y mira `docker logs alarma_backend`.
 
 ## Pruebas

@@ -44,13 +44,19 @@ function leerConfig(env = process.env) {
     fotoMaxBytes: num(env.FOTO_MAX_KB, 1024) * 1024,
     cuadroMaxBytes: num(env.CUADRO_MAX_KB, 150) * 1024,
     esperaS: num(env.CAMARA_ESPERA_S, 20),
-    ffmpeg: env.FFMPEG_BIN || 'ffmpeg'
+    ffmpeg: env.FFMPEG_BIN || 'ffmpeg',
+    // Para diagnostico y pruebas: usa una imagen de prueba en lugar de abrir RTSP
+    fuentePrueba: env.CAMARA_FUENTE_PRUEBA === '1',
+    pausaRechazoMs: num(env.CAMARA_PAUSA_RECHAZO_S, 30) * 1000
   };
 }
 
 const esperar = (ms, senal) => new Promise((res) => {
-  const t = setTimeout(res, ms);
-  if (senal) senal.addEventListener('abort', () => { clearTimeout(t); res(); }, { once: true });
+  if (senal && senal.aborted) return res();
+  // El listener se retira al terminar: si no, cada espera deja uno pegado a la senal (fuga)
+  const fin = () => { clearTimeout(t); if (senal) senal.removeEventListener('abort', fin); res(); };
+  const t = setTimeout(fin, ms);
+  if (senal) senal.addEventListener('abort', fin, { once: true });
 });
 
 /** Conexion TCP corta al puerto RTSP. No abre ningun flujo de video. */
@@ -82,7 +88,9 @@ class AgenteCamara {
   constructor(cfg, log = () => {}) {
     this.cfg = cfg;
     this.log = log;
-    this.entrada = cfg.entrada || ((ruta) => entradaRtsp(cfg, ruta));
+    this.entrada = cfg.entrada || (cfg.fuentePrueba
+      ? () => ['-re', '-f', 'lavfi', '-i', 'testsrc=size=1280x720:rate=10']
+      : ((ruta) => entradaRtsp(cfg, ruta)));
     this._fetch = cfg.fetch || fetch;
     this.parar = new AbortController();
     this.estadisticas = { fotos: 0, cuadros: 0, tareas: 0, errores: 0, ffmpegLanzados: 0 };
@@ -115,8 +123,8 @@ class AgenteCamara {
           headers: this._cabeceras(), signal: AbortSignal.timeout((this.cfg.esperaS + 15) * 1000)
         });
         if (r.status === 401 || r.status === 403) {
-          this.log('error', 'El backend rechazo el token de la camara (CAMARA_TOKEN / DEVICE_TOKEN).');
-          await esperar(30000, this.parar.signal);
+          this.log('error', 'El backend rechazo el token de la camara (revisa CAMARA_TOKEN o que la vivienda exista).');
+          await esperar(this.cfg.pausaRechazoMs || 30000, this.parar.signal);
           continue;
         }
         const j = await r.json();
@@ -246,7 +254,7 @@ class AgenteCamara {
 /** Arranca el agente si esta activado. Se llama cuando el backend ya escucha. */
 function iniciar(config = leerConfig()) {
   if (!config.activo) { console.log('Agente de camara RTSP desactivado (CAMARA_RTSP_ACTIVO no es 1).'); return null; }
-  const faltan = [['viviendaId', 'CAMARA_VIVIENDA_ID u ONVIF_VIVIENDA_ID'], ['token', 'CAMARA_TOKEN o DEVICE_TOKEN'],
+  const faltan = [['viviendaId', 'CAMARA_VIVIENDA_ID u ONVIF_VIVIENDA_ID'], ['token', 'CAMARA_TOKEN'],
     ['usuario', 'RTSP_USUARIO u ONVIF_USUARIO'], ['clave', 'RTSP_CLAVE u ONVIF_CLAVE']].filter(([k]) => !config[k]).map(([, n]) => n);
   if (faltan.length) { console.warn(`Agente de camara RTSP activado pero faltan: ${faltan.join(', ')}. No se inicia.`); return null; }
   const agente = new AgenteCamara(config, (nivel, msg) => (nivel === 'error' ? console.error : console.warn)(`[camara] ${msg}`));
@@ -255,4 +263,4 @@ function iniciar(config = leerConfig()) {
   return agente;
 }
 
-module.exports = { AgenteCamara, leerConfig, iniciar, alcanzable, entradaRtsp };
+module.exports = { AgenteCamara, leerConfig, iniciar, alcanzable, entradaRtsp, esperar };

@@ -26,7 +26,7 @@ try {
 const hayFfmpeg = (() => { try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); return true; } catch (e) { return false; } })();
 
 const { iniciarCamaraFalsa } = require('./camara_onvif_falsa');
-const { AgenteCamara, leerConfig } = require('../camara_rtsp');
+const crypto = require('crypto');
 
 const esperarMs = (ms) => new Promise((r) => setTimeout(r, ms));
 async function hasta(cond, ms = 15000) {
@@ -49,6 +49,9 @@ test('deteccion de persona de punta a punta, sin tocar la alarma', { skip: !(PGl
   const puerto = await puertoLibre();
   const base = `http://127.0.0.1:${puerto}`;
   let salida = '';
+  // "Camara" que solo acepta conexiones TCP, para que el agente la vea alcanzable
+  const alcance = net.createServer((c) => c.destroy());
+  await new Promise((r) => alcance.listen(0, '127.0.0.1', r));
 
   // --- Servidor real
   const servidor = spawn(process.execPath, ['server.js'], {
@@ -60,16 +63,19 @@ test('deteccion de persona de punta a punta, sin tocar la alarma', { skip: !(PGl
       CAMARA_RAFAGA: '3',
       ONVIF_ACTIVO: '1', ONVIF_VIVIENDA_ID: 'casa-001', ONVIF_HOST: '127.0.0.1', ONVIF_PUERTO: String(camaraOnvif.puerto),
       ONVIF_USUARIO: camaraOnvif.usuario, ONVIF_CLAVE: camaraOnvif.clave,
+      // Agente de la camara dentro del servidor, con imagen de prueba en lugar de RTSP y sin CAMARA_TOKEN:
+      // usa el token interno, porque la vivienda de la prueba tiene token propio y rechaza el global
+      CAMARA_RTSP_ACTIVO: '1', RTSP_HOST: '127.0.0.1', RTSP_PUERTO: String(alcance.address().port),
+      CAMARA_FUENTE_PRUEBA: '1', CAMARA_ESPERA_S: '2', CAMARA_PAUSA_RECHAZO_S: '1',
       ONVIF_SUSCRIPCION_S: '4', ONVIF_LONGPOLL_S: '1', ONVIF_VENTANA_SYNC_MS: '1500', ONVIF_DEDUP_MS: '300'
     }
   });
   servidor.stdout.on('data', (d) => { salida += d; });
   servidor.stderr.on('data', (d) => { salida += d; });
 
-  let agente = null;
   t.after(async () => {
-    if (agente) await agente.detener();
     servidor.kill('SIGKILL');
+    alcance.close();
     await camaraOnvif.cerrar();
     await sockDb.stop();
     await db.close();
@@ -81,7 +87,9 @@ test('deteccion de persona de punta a punta, sin tocar la alarma', { skip: !(PGl
       `el servidor no arranco:\n${salida.slice(-1500)}`);
 
     // La vivienda, armada, y una cuenta propietaria para consultar la API
-    await db.query(`INSERT INTO viviendas (id, nombre) VALUES ('casa-001', 'Casa 001') ON CONFLICT DO NOTHING`);
+    const tokenPropio = 'token-propio-de-la-vivienda';
+    await db.query(`INSERT INTO viviendas (id, nombre, token_hash) VALUES ('casa-001', 'Casa 001', $1)
+                    ON CONFLICT (id) DO UPDATE SET token_hash = $1`, [crypto.createHash('sha256').update(tokenPropio).digest('hex')]);
     await db.query(`INSERT INTO estado_vivienda (vivienda_id, armado) VALUES ('casa-001', true)
                     ON CONFLICT (vivienda_id) DO UPDATE SET armado = true`);
     const reg = await fetch(`${base}/auth/registro`, {
@@ -103,18 +111,16 @@ test('deteccion de persona de punta a punta, sin tocar la alarma', { skip: !(PGl
     assert.equal(det0.conectado, true);
     assert.equal((await db.query('SELECT 1 FROM eventos_camara')).rows.length, 0, 'la sincronizacion inicial no debe generar eventos');
 
-    // El agente de la camara (ffmpeg con una fuente de prueba en lugar de RTSP)
-    const alcance = net.createServer((c) => c.destroy());
-    await new Promise((r) => alcance.listen(0, '127.0.0.1', r));
-    t.after(() => alcance.close());
-    agente = new AgenteCamara({
-      ...leerConfig({}), viviendaId: 'casa-001', camaraId: 'mc210', token: 'token-global', baseUrl: base,
-      host: '127.0.0.1', puerto: alcance.address().port, usuario: 'u', clave: 'c', esperaS: 2,
-      entrada: () => ['-f', 'lavfi', '-i', 'testsrc=size=1280x720:rate=10']
-    }, () => {});
-    agente.iniciar();
+    // Con token propio la vivienda rechaza el global; con el suyo, acepta
+    const consultaTarea = (token) => fetch(`${base}/camara/tarea?vivienda_id=casa-001&camara_id=prueba&espera=1`, { headers: { 'X-Device-Token': token } });
+    assert.equal((await consultaTarea('token-global')).status, 401);
+    assert.equal((await consultaTarea('hv_inventado')).status, 401);
+    assert.equal((await consultaTarea(tokenPropio)).status, 200);
+    // El token interno no se puede adivinar ni sirve desde fuera: solo el agente de este proceso lo conoce
+
+    // El agente interno (ffmpeg con imagen de prueba) aparece en linea usando el token interno
     assert.ok(await hasta(async () => (await db.query('SELECT 1 FROM camaras WHERE camara_id = $1', ['mc210'])).rows.length === 1),
-      'la camara no figura en linea');
+      `la camara no figura en linea (el agente no se autentico):\n${salida.slice(-1500)}`);
 
     // --- Entra una persona
     await esperarMs(1600);
