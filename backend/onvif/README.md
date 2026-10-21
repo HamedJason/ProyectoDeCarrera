@@ -72,6 +72,20 @@ Los demas ajustes (cooldowns, ventana de sincronizacion, duracion de la suscripc
 4. Si todo cuadra, en `deploy/.env`: `ONVIF_ACTIVO=1`, `ONVIF_VIVIENDA_ID`, usuario y clave, `CAMARA_RTSP_ACTIVO=1`;
    reconstruye (`docker compose up -d --build backend`) y mira `docker logs alarma_backend`.
 
+## Configuracion recomendada
+
+```
+ONVIF_ACTIVO=1
+ONVIF_SIRENA=persona              # una persona con la casa armada hace sonar la alarma
+ONVIF_ALERTAR=persona,movimiento  # un movimiento solo manda un aviso, para que mires la camara y juzgues
+ONVIF_SIRENA_S=30
+ONVIF_RETARDO_SALIDA_S=60
+```
+
+Un movimiento suelto avisa como maximo una vez cada `ONVIF_COOLDOWN_MOVIMIENTO_S` (120 s por omision), con la
+invitacion a abrir la app, y pide una foto. Si llega una persona a la vez, solo suena la alarma (sin aviso de
+movimiento aparte).
+
 ## Alarma disparada por la camara
 
 Con `ONVIF_SIRENA=movimiento`, un movimiento detectado con la casa **armada** (y pasado el retardo de salida)
@@ -89,9 +103,27 @@ marca la alarma, avisa con prioridad maxima, pide fotos y enciende la salida aud
 - **Falsas alarmas:** el movimiento de la MC210 es muy sensible (luz, sombras, cortinas). Ajusta la sensibilidad y
   la zona de deteccion en la aplicacion de la camara, y valora usar `persona` en lugar de `movimiento`.
 
+## Fluidez de la vista en vivo
+
+La vista en vivo sale a `CAMARA_VIVO_FPS` cuadros por segundo (10 por omision) con `CAMARA_VIVO_ANCHO` pixeles
+de ancho. El servidor retransmite cada cuadro al instante; el limite lo ponen los fps pedidos, lo que da el
+flujo de la camara por el tunel, el tamano de cada cuadro (`CUADRO_MAX_KB`, los mayores se descartan) y el caudal
+hacia el telefono.
+
+Para elegir el valor con datos, en el VPS:
+
+```
+docker exec alarma_backend node camara_medir.js            # 10 s por prueba, stream2
+docker exec alarma_backend node camara_medir.js 15 stream1 # otro flujo
+```
+
+Muestra cuantos cuadros por segundo llegan de verdad con cada objetivo (4, 8, 10, 12, 15...), el tamano por
+cuadro y el caudal, y sugiere un `CAMARA_VIVO_FPS`. Cada sesion de vista en vivo deja ademas una linea en
+`docker logs alarma_backend` con los fps reales, el tamano medio y los cuadros omitidos.
+
 ## Pruebas
 
-`npm test` (51 pruebas, ~1.5 min). Usan una camara ONVIF simulada (`test/camara_onvif_falsa.js`),
+`npm test` (58 pruebas, ~2 min). Usan una camara ONVIF simulada (`test/camara_onvif_falsa.js`),
 ffmpeg con una fuente de prueba y, en la de extremo a extremo, PostgreSQL en memoria (PGlite).
 
 Cubren: sincronizacion inicial sin alertas, cambios reales, repetidos, cooldown, desconocido al

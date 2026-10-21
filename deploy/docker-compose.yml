@@ -97,6 +97,11 @@ services:
       CAMARA_TOKEN: ${CAMARA_TOKEN:-}
       RTSP_RUTA_FOTO: ${RTSP_RUTA_FOTO:-stream1}
       RTSP_RUTA_VIVO: ${RTSP_RUTA_VIVO:-stream2}
+      # Fluidez de la vista en vivo. Mas fps = mas fluido pero mas caudal al telefono y mas CPU.
+      # Mide cuanto aguanta tu camara con: docker exec alarma_backend node camara_medir.js
+      CAMARA_VIVO_FPS: ${CAMARA_VIVO_FPS:-10}
+      CAMARA_VIVO_ANCHO: ${CAMARA_VIVO_ANCHO:-640}
+      CUADRO_MAX_KB: ${CUADRO_MAX_KB:-150}
     volumes:
       - datos_fotos:/app/datos
     depends_on:

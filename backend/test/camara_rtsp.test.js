@@ -103,6 +103,13 @@ test('vivo: manda cuadros JPEG de stream2 hasta que el servidor dice que pare y 
     assert.ok(b.cuadros.every(esJpeg), 'algun cuadro no es un JPEG completo');
     assert.ok(b.cuadros.every((c) => c.length <= 150 * 1024));
     assert.deepEqual([...new Set(a.rutas)], ['stream2']);
+    // Tras la sesion el agente deja las cifras reales de lo que logro enviar
+    assert.ok(await hasta(() => a.estadisticas.ultimoVivo && a.estadisticas.ultimoVivo.cuadros >= 6, 4000), 'no hay estadisticas de la sesion');
+    const u = a.estadisticas.ultimoVivo;
+    // Con solo 6 cuadros la cifra es una estimacion gruesa (el arranque de ffmpeg manda una rafaga): solo se comprueba que exista y sea razonable
+    assert.ok(u.fps > 2 && u.fps < 40, `fps reales fuera de rango: ${u.fps}`);
+    assert.ok(u.kb_por_cuadro > 0);
+    assert.equal(u.omitidos_por_tamano, 0);
     // Tras la orden de parar, el agente cierra ffmpeg y vuelve a preguntar por tareas
     const consultas = b.consultas;
     assert.ok(await hasta(() => a.procesoActual === null && b.consultas > consultas, 5000), 'no volvio a preguntar');

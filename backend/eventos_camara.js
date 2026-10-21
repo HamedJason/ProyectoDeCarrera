@@ -11,6 +11,9 @@
  * Politica por omision (se cambia con variables de entorno):
  *   - TODO cambio real queda en la tabla eventos_camara.
  *   - Solo AVISAN las personas (ONVIF_ALERTAR=persona). El movimiento se registra.
+ *     Combinacion recomendada: ONVIF_SIRENA=persona (la persona hace sonar la alarma) y
+ *     ONVIF_ALERTAR=persona,movimiento (el movimiento solo manda un aviso para que el
+ *     residente mire la camara; suena como maximo una vez cada ONVIF_COOLDOWN_MOVIMIENTO_S).
  *   - Solo avisa con el sistema armado (ONVIF_SOLO_ARMADO=1): con alguien en casa
  *     una persona en el encuadre es lo normal.
  *   - NO activa la sirena. Solo si se pide con ONVIF_SIRENA=movimiento (o persona) y
@@ -61,7 +64,9 @@ function leerConfig(env = process.env) {
 
 const TEXTOS = {
   persona: { titulo: 'Persona detectada', cuerpo: 'La camara detecto una persona', etiquetas: ['bust_in_silhouette'] },
-  movimiento: { titulo: 'Movimiento detectado', cuerpo: 'La camara detecto movimiento', etiquetas: ['eyes'] }
+  movimiento: { titulo: 'Movimiento detectado', cuerpo: 'La camara detecto movimiento', etiquetas: ['eyes'],
+                // Un movimiento suelto no suena la alarma: se avisa para que el residente mire la camara y juzgue
+                sugerencia: 'Abre la app para ver la camara y revisar si es algo serio.' }
 };
 
 let servicio = null;
@@ -143,7 +148,7 @@ function iniciar({ notificar, solicitarFoto, activarAlarma = null, config = leer
       else await marcarAlerta(a, (r && r.nota) || 'no se activo la alarma', false);
       return;
     }
-    notificar(config.viviendaId, t.titulo, `${t.cuerpo}.`, 4, t.etiquetas);
+    notificar(config.viviendaId, t.titulo, t.sugerencia ? `${t.cuerpo}. ${t.sugerencia}` : `${t.cuerpo}.`, 4, t.etiquetas);
     // La foto usa el mecanismo de evidencias existente; no bloquea ni falla el aviso
     solicitarFoto(config.viviendaId, t.cuerpo, null, { usuario: 'evento' });
     await marcarAlerta(a, null);

@@ -29,6 +29,8 @@ function consultaFalsa({ armado, armarReciente = false }) {
   return c;
 }
 
+// La suscripcion es larga a proposito: si bajo carga se recreara a media prueba, el primer mensaje tras reconectar
+// seria solo sincronizacion (por diseno) y la prueba esperaria un cambio que no llega.
 async function montar({ armado = true, env = {}, armarReciente = false, respuestaAlarma = { avisado: true, nota: null } } = {}) {
   const camara = await iniciarCamaraFalsa();
   const consulta = consultaFalsa({ armado, armarReciente });
@@ -36,7 +38,7 @@ async function montar({ armado = true, env = {}, armarReciente = false, respuest
   const config = eventosCamara.leerConfig({
     ONVIF_ACTIVO: '1', ONVIF_VIVIENDA_ID: 'casa-001', ONVIF_HOST: '127.0.0.1', ONVIF_PUERTO: String(camara.puerto),
     ONVIF_USUARIO: camara.usuario, ONVIF_CLAVE: camara.clave,
-    ONVIF_SUSCRIPCION_S: '2', ONVIF_LONGPOLL_S: '1', ONVIF_DEDUP_MS: '300', ONVIF_VENTANA_SYNC_MS: '1500', ...env
+    ONVIF_SUSCRIPCION_S: '30', ONVIF_LONGPOLL_S: '1', ONVIF_DEDUP_MS: '300', ONVIF_VENTANA_SYNC_MS: '1500', ...env
   });
   const servicio = eventosCamara.iniciar({
     config, consulta,
@@ -216,4 +218,45 @@ test('leerConfig: sirena apagada por omision, 30 s y retardo de salida de 60 s',
   assert.equal(c.retardoSalidaS, 60);
   assert.deepEqual(eventosCamara.leerConfig({ ONVIF_SIRENA: 'movimiento, persona, otra' }).sirena, ['movimiento', 'persona']);
   assert.equal(eventosCamara.leerConfig({ ONVIF_RETARDO_SALIDA_S: '0' }).retardoSalidaS, 0);
+});
+
+test('politica recomendada: la persona activa la alarma y el movimiento solo manda un aviso para mirar la camara', async () => {
+  const { camara, avisos, fotos, activaciones, servicio, cerrar } = await montar({ armado: true,
+    env: { ONVIF_SIRENA: 'persona', ONVIF_ALERTAR: 'persona,movimiento', ONVIF_RETARDO_SALIDA_S: '0' } });
+  try {
+    assert.ok(await hasta(() => servicio.estado().motor.persona === false && servicio.estado().motor.movimiento === false));
+    await esperarMs(1600);
+
+    // Movimiento solo: aviso (no alarma), con la invitacion a mirar la camara, y una foto
+    camara.emitir({ tipo: 'movimiento', valor: true });
+    assert.ok(await hasta(() => avisos.length === 1, 3000));
+    assert.equal(activaciones.length, 0, 'un movimiento no debe activar la alarma');
+    assert.equal(avisos[0][1], 'Movimiento detectado');
+    assert.match(avisos[0][2], /revisar si es algo serio/);
+    assert.equal(fotos.length, 1);
+    camara.emitir({ tipo: 'movimiento', valor: false });
+    await esperarMs(1200);
+
+    // Persona: alarma (que ya avisa por si misma), sin un segundo aviso comun
+    camara.emitir({ tipo: 'persona', valor: true });
+    assert.ok(await hasta(() => activaciones.length === 1, 3000));
+    assert.deepEqual(activaciones[0].slice(0, 2), ['casa-001', 'La camara detecto una persona']);
+    await esperarMs(800);
+    assert.equal(avisos.length, 1, 'la persona no debe mandar ademas un aviso comun');
+  } finally { await cerrar(); }
+});
+
+test('si llegan persona y movimiento a la vez con esa politica: solo la alarma, sin aviso de movimiento aparte', async () => {
+  const { camara, avisos, activaciones, servicio, cerrar } = await montar({ armado: true,
+    env: { ONVIF_SIRENA: 'persona', ONVIF_ALERTAR: 'persona,movimiento', ONVIF_RETARDO_SALIDA_S: '0' } });
+  try {
+    assert.ok(await hasta(() => servicio.estado().motor.persona === false && servicio.estado().motor.movimiento === false));
+    await esperarMs(1600);
+    camara.emitir({ tipo: 'movimiento', valor: true });
+    camara.emitir({ tipo: 'persona', valor: true });
+    assert.ok(await hasta(() => activaciones.length === 1, 3000));
+    await esperarMs(1000);
+    assert.equal(avisos.length, 0);
+    assert.equal(activaciones.length, 1);
+  } finally { await cerrar(); }
 });

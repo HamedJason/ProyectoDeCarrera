@@ -520,9 +520,50 @@
   .eventos .alarma .etiqueta { background: var(--sirena-claro); color: var(--sirena); }
   .eventos .vacio { color: var(--tinta-2); font-size: 14px; padding: 8px 0; }
 
-  /* ---- Camara ---- */
-  .camara-botones { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
-  .camara-botones .nota { font-size: 13px; color: var(--tinta-2); }
+  /* ---- Camara (bloque dentro de la tarjeta de estado) ---- */
+  .lado { display: block; }
+  .cam-mini {
+    --c: var(--tinta-2);
+    margin-top: 14px; padding: 12px; border-radius: 16px;
+    background: rgba(255, 255, 255, .6); border: 1px solid var(--linea);
+    transition: border-color .3s, background-color .3s;
+  }
+  .escena.alarma .cam-mini { background: rgba(255, 255, 255, .7); border-color: rgba(210, 47, 39, .35); }
+  .cam-mini[data-est="ok"] { --c: var(--pino); }
+  .cam-mini[data-est="alerta"] { --c: var(--ambar-texto); border-color: var(--ambar); background: #FFF7E3; }
+  .cam-mini[data-est="off"] { --c: var(--tinta-2); }
+  .cam-cab { display: flex; align-items: center; gap: 11px; }
+  .cam-icono {
+    position: relative; flex: none; width: 42px; height: 42px; border-radius: 13px;
+    display: grid; place-items: center; background: var(--pino-claro); color: var(--pino);
+  }
+  .cam-mini[data-est="alerta"] .cam-icono { background: #FBE6B3; color: var(--ambar-texto); }
+  .cam-mini[data-est="off"] .cam-icono { background: var(--yeso); color: var(--tinta-2); }
+  .cam-icono svg, .cam-btn svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+  .cam-punto {
+    position: absolute; right: -3px; top: -3px; width: 12px; height: 12px; border-radius: 50%;
+    background: var(--c); border: 2px solid var(--papel);
+  }
+  .cam-mini[data-est="ok"] .cam-punto { animation: cam-latido 2.4s ease-in-out infinite; }
+  .cam-mini[data-est="alerta"] .cam-punto { animation: cam-latido .8s ease-in-out infinite; }
+  @keyframes cam-latido { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--c) 45%, transparent); } 50% { box-shadow: 0 0 0 5px transparent; } }
+  .cam-texto { min-width: 0; flex: 1; }
+  .cam-titulo { font-size: 15px; font-weight: 800; letter-spacing: -.01em; line-height: 1.2; }
+  .cam-titulo span { font-weight: 700; font-size: 13px; color: var(--c); margin-left: 4px; }
+  .cam-detalle { font-size: 12.5px; color: var(--tinta-2); margin-top: 2px; line-height: 1.3; }
+  .cam-acciones { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 11px; }
+  .cam-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    padding: 10px 8px; font: inherit; font-size: 14px; font-weight: 700; color: var(--tinta);
+    background: #fff; border: 1.5px solid var(--linea); border-radius: 11px; cursor: pointer;
+    transition: transform .08s, background-color .2s, opacity .15s;
+  }
+  .cam-btn svg { width: 18px; height: 18px; }
+  .cam-btn.primario { background: var(--tinta); border-color: var(--tinta); color: #fff; }
+  .cam-btn:active { transform: scale(.97); }
+  .cam-btn:disabled { opacity: .5; cursor: default; }
+  .cam-nota { font-size: 12.5px; color: var(--tinta-2); margin-top: 8px; min-height: 0; }
+  .cam-nota:empty { display: none; }
   .galeria { display: grid; grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 8px; margin-top: 12px; }
   .galeria button { position: relative; padding: 0; border: 1.5px solid var(--linea); border-radius: 12px; overflow: hidden; background: var(--yeso); aspect-ratio: 4 / 3; cursor: pointer; }
   .galeria img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -535,7 +576,7 @@
   /* ---- Pantallas anchas: el titular y los botones van lado a lado ---- */
   @media (min-width: 720px) {
     .envoltura { padding-top: 24px; }
-    .escena { display: grid; grid-template-columns: minmax(0, 1fr) 260px; column-gap: 28px; align-items: end; padding: 28px 28px 26px; }
+    .escena { display: grid; grid-template-columns: minmax(0, 1fr) 280px; column-gap: 28px; align-items: end; padding: 28px 28px 26px; }
     .escena .controles { margin-top: 0; }
     .rejilla { grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); }
   }
@@ -618,9 +659,33 @@
       <p class="subtitular" id="subtitular"></p>
     </div>
 
-    <div class="controles">
-      <button class="boton apagar-alarma" id="boton-apagar-alarma" onclick="apagarAlarma()" hidden>Apagar alarma</button>
-      <button class="boton armar" id="boton-armado" onclick="alternarArmado()">Armar la casa</button>
+    <div class="lado">
+      <div class="controles">
+        <button class="boton apagar-alarma" id="boton-apagar-alarma" onclick="apagarAlarma()" hidden>Apagar alarma</button>
+        <button class="boton armar" id="boton-armado" onclick="alternarArmado()">Armar la casa</button>
+      </div>
+
+      <div class="cam-mini" id="cam-mini" data-est="off" hidden>
+        <div class="cam-cab">
+          <span class="cam-icono" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h8A2.5 2.5 0 0 1 16 8.5v7a2.5 2.5 0 0 1-2.5 2.5h-8A2.5 2.5 0 0 1 3 15.5z"/><path d="m16 10.5 4.2-2.4a.6.6 0 0 1 .9.5v6.8a.6.6 0 0 1-.9.5L16 13.5"/></svg>
+            <i class="cam-punto"></i>
+          </span>
+          <div class="cam-texto">
+            <div class="cam-titulo">Cámara <span id="camara-estado">Sin conexión</span></div>
+            <div class="cam-detalle" id="cam-detalle"></div>
+          </div>
+        </div>
+        <div class="cam-acciones">
+          <button type="button" class="cam-btn primario" id="boton-vivo" onclick="abrirVivo()">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8"/></svg>Ver en vivo
+          </button>
+          <button type="button" class="cam-btn" id="boton-foto" onclick="solicitarFoto()">
+            <svg viewBox="0 0 24 24"><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2.2l1.2-1.8h6.2L16.3 7h2.2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="13" r="3.2"/></svg>Tomar foto
+          </button>
+        </div>
+        <div class="cam-nota" id="camara-nota" aria-live="polite"></div>
+      </div>
     </div>
   </section>
 
@@ -666,12 +731,7 @@
   </section>
 
   <section class="grupo" id="grupo-camara" hidden aria-label="Cámara">
-    <div class="grupo-cab"><h2>Cámara</h2><span class="cuenta" id="camara-estado"></span></div>
-    <div class="camara-botones">
-      <button class="boton-texto" id="boton-foto" onclick="solicitarFoto()">Tomar foto</button>
-      <button class="boton-texto" id="boton-vivo" onclick="abrirVivo()">Ver en vivo</button>
-      <span class="nota" id="camara-nota"></span>
-    </div>
+    <div class="grupo-cab"><h2>Cámara</h2></div>
     <div class="det" id="det" hidden>
       <h3 class="det-titulo" style="margin:0 0 2px;font-size:16px">Detección de la cámara</h3>
       <div class="det-estado" id="det-estado"></div>
@@ -1902,6 +1962,7 @@ function reiniciarVistas() {
   $('lista').innerHTML = '<li class="cargando">Consultando el servidor</li>';
   $('galeria').innerHTML = '';
   $('grupo-camara').hidden = true;
+  $('cam-mini').hidden = true;
   $('det').hidden = true;
   $('grupo-contactos').hidden = true; $('grupo-movimiento').hidden = true; $('sin-sensores').hidden = true;
   for (const b of ['banda-hub', 'banda-nodos', 'banda-nuevos']) $(b).hidden = true;
@@ -2191,8 +2252,9 @@ async function refrescarCamara() {
 function pintarCamara() {
   const visible = !!camara && (camara.registrada || fotos.length > 0);
   $('grupo-camara').hidden = !visible;
+  $('cam-mini').hidden = !visible;
   if (!visible) return;
-  $('camara-estado').textContent = camara.en_linea ? 'En línea' : 'Sin conexión';
+  pintarCamaraMini();
   $('boton-foto').disabled = !camara.en_linea;
   $('boton-vivo').disabled = !camara.en_linea;
 
@@ -2206,6 +2268,33 @@ function pintarCamara() {
   }
   $('boton-mas-fotos').hidden = fotos.length < limiteFotos;
   pintarDeteccion();
+}
+
+// Estado de la camara en la tarjeta principal: conexion + lo que ve ahora + ultima deteccion
+function pintarCamaraMini() {
+  const det = deteccion && deteccion.activa ? deteccion : null;
+  const ultimo = agruparEventos(eventosCamara)[0];
+  let est = 'ok', etiqueta = 'En línea', detalle = '';
+  if (!camara.en_linea) {
+    est = 'off'; etiqueta = 'Sin conexión';
+    detalle = 'No responde. Revisa que tenga corriente y Wi-Fi.';
+  } else if (det && det.conectado && det.persona === true) {
+    est = 'alerta'; etiqueta = 'Ve a una persona'; detalle = 'Ahora mismo en el encuadre.';
+  } else if (det && det.conectado && det.movimiento === true) {
+    est = 'alerta'; etiqueta = 'Ve movimiento'; detalle = 'Abre la vista en vivo para revisarlo.';
+  } else if (det && !det.conectado) {
+    detalle = 'Detección sin conexión; se reintenta sola.';
+  } else if (det) {
+    detalle = 'Vigilando, sin nada en el encuadre.';
+  } else {
+    detalle = 'Lista para ver en vivo o tomar una foto.';
+  }
+  if (ultimo && est === 'ok' && det && det.conectado) {
+    detalle = 'Vigilando · última ' + (ultimo.detector === 'persona' ? 'persona' : 'movimiento') + ' ' + formatearFecha(ultimo.t);
+  }
+  $('cam-mini').dataset.est = est;
+  $('camara-estado').textContent = '· ' + etiqueta;
+  $('cam-detalle').textContent = detalle;
 }
 
 // Cada paso frente a la camara genera varios eventos seguidos del mismo tipo: se agrupan los que

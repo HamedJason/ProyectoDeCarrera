@@ -111,10 +111,10 @@ test('mensajes Initialized repetidos con el mismo valor no generan nada', async 
 test('la suscripcion se renueva sin reconectar: una sola creacion en varios ciclos', async () => {
   const { camara, servicio, cerrar } = await montar({}, { suscripcionS: 2 });   // renueva cada 1 s
   try {
-    assert.ok(await hasta(() => camara.contadores.renovar >= 2, 6000));
+    // El servicio cuenta la renovacion al recibir la respuesta, un instante despues de que la camara la recibe: se espera su contador
+    assert.ok(await hasta(() => servicio.estado().renovaciones >= 2, 8000));
     assert.equal(camara.contadores.crear, 1);
     assert.equal(servicio.estado().conexiones, 1);
-    assert.ok(servicio.estado().renovaciones >= 2);
   } finally { await cerrar(); }
 });
 

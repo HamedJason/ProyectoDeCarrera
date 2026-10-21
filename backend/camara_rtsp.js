@@ -39,7 +39,9 @@ function leerConfig(env = process.env) {
     clave: env.RTSP_CLAVE || env.ONVIF_CLAVE || '',
     rutaFoto: env.RTSP_RUTA_FOTO || 'stream1',   // mejor calidad: se pide solo un cuadro
     rutaVivo: env.RTSP_RUTA_VIVO || 'stream2',   // menor calidad: es un flujo continuo
-    vivoFps: num(env.CAMARA_VIVO_FPS, 4),
+    // Cuadros por segundo de la vista en vivo. Mas fps = mas fluido, pero mas caudal hacia el telefono y mas CPU.
+    // 'node camara_medir.js' mide cuanto aguanta de verdad el flujo de la camara para elegir el valor.
+    vivoFps: num(env.CAMARA_VIVO_FPS, 10),
     vivoAncho: num(env.CAMARA_VIVO_ANCHO, 640),
     fotoMaxBytes: num(env.FOTO_MAX_KB, 1024) * 1024,
     cuadroMaxBytes: num(env.CUADRO_MAX_KB, 150) * 1024,
@@ -207,6 +209,8 @@ class AgenteCamara {
     p.stderr.on('data', (d) => { err += d; });
 
     let continuar = true, enVuelo = false, resto = Buffer.alloc(0);
+    // Estadisticas de la sesion, para saber a cuantos cuadros por segundo llega de verdad
+    const st = { inicio: Date.now(), primero: 0, enviados: 0, bytes: 0, omitidosEnvio: 0, omitidosTamano: 0 };
     const limite = setTimeout(() => { continuar = false; p.kill('SIGKILL'); }, ((tarea.restante_s || 300) + 10) * 1000);
     const alAbortar = () => { continuar = false; p.kill('SIGKILL'); };
     this.parar.signal.addEventListener('abort', alAbortar, { once: true });
@@ -218,8 +222,8 @@ class AgenteCamara {
           method: 'POST', headers: this._cabeceras({ 'Content-Type': 'image/jpeg' }), body: jpg, signal: AbortSignal.timeout(8000)
         });
         const j = await r.json().catch(() => ({}));
+        if (r.status === 200) { this.estadisticas.cuadros++; st.enviados++; st.bytes += jpg.length; }
         if (r.status === 200 && j.continuar === false) { continuar = false; p.kill('SIGKILL'); }
-        else if (r.status === 200) this.estadisticas.cuadros++;
       } catch (e) { /* un cuadro perdido no detiene la sesion */ } finally { enVuelo = false; }
     };
 
@@ -233,9 +237,12 @@ class AgenteCamara {
           resto = resto.subarray(fin + 2);
           const inicio = jpg.indexOf(Buffer.from([0xff, 0xd8]));
           if (inicio === -1 || !continuar) continue;
+          if (!st.primero) st.primero = Date.now();   // los fps se cuentan desde el primer cuadro, no desde que ffmpeg se conecta
           const cuadro = jpg.subarray(inicio);
+          if (cuadro.length > cfg.cuadroMaxBytes) { st.omitidosTamano++; continue; }
           // Si el cuadro anterior sigue enviandose, este se salta en vez de acumular
-          if (!enVuelo && cuadro.length <= cfg.cuadroMaxBytes) enviar(cuadro);
+          if (enVuelo) { st.omitidosEnvio++; continue; }
+          enviar(cuadro);
         }
         if (resto.length > cfg.cuadroMaxBytes * 4) resto = Buffer.alloc(0);   // proteccion ante datos sin forma
       });
@@ -245,6 +252,18 @@ class AgenteCamara {
     clearTimeout(limite);
     this.parar.signal.removeEventListener('abort', alAbortar);
     this.procesoActual = null;
+    const seg = Math.max(0.001, (Date.now() - (st.primero || st.inicio)) / 1000);
+    this.estadisticas.ultimoVivo = {
+      cuadros: st.enviados, segundos: Math.round(seg * 10) / 10, fps: Math.round((st.enviados / seg) * 10) / 10,
+      kb_por_cuadro: st.enviados ? Math.round(st.bytes / st.enviados / 102.4) / 10 : 0,
+      omitidos_por_envio_lento: st.omitidosEnvio, omitidos_por_tamano: st.omitidosTamano
+    };
+    if (st.enviados > 0) {
+      const u = this.estadisticas.ultimoVivo;
+      this.log('info', `Vista en vivo terminada: ${u.cuadros} cuadros en ${u.segundos} s = ${u.fps} fps reales (objetivo ${cfg.vivoFps}), ` +
+        `${u.kb_por_cuadro} KB por cuadro (${Math.round(st.bytes / seg / 1024)} KB/s). ` +
+        `Omitidos: ${u.omitidos_por_envio_lento} por envio lento, ${u.omitidos_por_tamano} por superar ${Math.round(cfg.cuadroMaxBytes / 1024)} KB.`);
+    }
     if (continuar && !this.parar.signal.aborted && err.trim()) {
       throw new Error(`ffmpeg termino antes de lo esperado: ${ocultar(cfg, err).trim().split('\n').pop()}`);
     }
