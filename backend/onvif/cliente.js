@@ -125,13 +125,16 @@ class ClienteOnvif {
     try {
       r = await this._fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': `application/soap+xml; charset=utf-8${accion ? `; action="${accion}"` : ''}` },
+        // Connection: close porque el servidor HTTP de la camara cierra el socket tras cada
+        // respuesta; reutilizarlo hacia fallar la peticion siguiente ("fetch failed").
+        headers: { 'Content-Type': `application/soap+xml; charset=utf-8${accion ? `; action="${accion}"` : ''}`, 'Connection': 'close' },
         body: sobre,
         signal: AbortSignal.timeout(timeoutMs)
       });
       crudo = await r.text();
     } catch (e) {
-      throw new ErrorOnvif(`Sin respuesta de la camara (${e.name === 'TimeoutError' ? 'tiempo agotado' : e.message})`, { tipo: 'red' });
+      const causa = e.cause && (e.cause.code || e.cause.message);
+      throw new ErrorOnvif(`Sin respuesta de la camara (${e.name === 'TimeoutError' ? 'tiempo agotado' : e.message}${causa ? `: ${causa}` : ''})`, { tipo: 'red' });
     }
     if (this.registroXml) this.registroXml('<-', `${url} [HTTP ${r.status}]`, crudo);
 

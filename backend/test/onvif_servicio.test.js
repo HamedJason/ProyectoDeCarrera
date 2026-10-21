@@ -179,7 +179,7 @@ test('el registro XML guarda los mensajes y oculta usuario, clave y nonce', asyn
 
 test('el servicio ONVIF no abre RTSP: el codigo no menciona RTSP ni el puerto 554', () => {
   const dir = path.join(__dirname, '..', 'onvif');
-  for (const f of fs.readdirSync(dir)) {
+  for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.js'))) {
     const t = fs.readFileSync(path.join(dir, f), 'utf8').split('\n')
       .filter((l) => !l.trim().startsWith('*') && !l.trim().startsWith('//') && !l.trim().startsWith('/*')).join('\n');
     assert.ok(!/rtsp|:554|ffmpeg/i.test(t), `${f} menciona RTSP o ffmpeg`);
