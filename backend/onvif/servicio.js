@@ -42,7 +42,7 @@ class ServicioOnvif {
     this.corriendo = false;
     this.estadoInfo = {
       conectado: false, ultimaConexionMs: null, ultimoMensajeMs: null, ultimoErrorMs: null, ultimoError: null,
-      conexiones: 0, renovaciones: 0, errores: 0, mensajes: 0, topicsCamara: [], faltanTopics: []
+      conexiones: 0, renovaciones: 0, cortesRecuperados: 0, errores: 0, mensajes: 0, topicsCamara: [], faltanTopics: []
     };
   }
 
@@ -121,6 +121,7 @@ class ServicioOnvif {
   }
 
   async _escuchar(sus) {
+    let cortes = 0;
     while (!this.parar.signal.aborted) {
       if (this.ahora() >= sus.renovarEnMs) {
         await this.cliente.renovar(sus, this.cfg.suscripcionS);
@@ -128,7 +129,20 @@ class ServicioOnvif {
         this.estadoInfo.renovaciones++;
       }
       const t0 = this.ahora();
-      const mensajes = await this.cliente.extraer(sus, { esperaS: this.cfg.esperaS });
+      let mensajes;
+      try {
+        mensajes = await this.cliente.extraer(sus, { esperaS: this.cfg.esperaS });
+        cortes = 0;
+      } catch (e) {
+        // La camara a veces cierra el socket en mitad de una espera. La suscripcion sigue viva:
+        // se repite la misma espera sin declarar la camara desconocida ni crear otra suscripcion.
+        if (this.parar.signal.aborted) return;
+        if (!(e instanceof ErrorOnvif && e.transitorio) || ++cortes > 3) throw e;
+        this.estadoInfo.cortesRecuperados++;
+        this.log('info', `La camara cerro la conexion (${e.causa}); se repite la espera (${cortes}/3).`);
+        await esperar(300, this.parar.signal);
+        continue;
+      }
       if (this.parar.signal.aborted) return;
       for (const m of mensajes) {
         this.estadoInfo.mensajes++;

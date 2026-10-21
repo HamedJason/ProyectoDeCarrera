@@ -38,7 +38,7 @@ async function main() {
     process.exit(2);
   }
   const cliente = new ClienteOnvif({ host, puerto, usuario, clave, registroXml: crearRegistroXml(rutaXml, { secretos: [clave] }) });
-  const contadores = { mensajes: 0, operaciones: {}, valores: {} };
+  const contadores = { consultas: 0, cortes: 0, cortesSeguidos: 0, mensajes: 0, operaciones: {}, valores: {} };
   const motor = new MotorEventos({
     cooldownPersonaMs: 60000, cooldownMovimientoMs: 120000, dedupMs: 3000, ventanaSyncMs: 5000,
     alEvento: (e) => linea(`  >> EVENTO  ${e.detector} ${e.transicion}`),
@@ -71,7 +71,19 @@ async function main() {
   try {
     while (Date.now() < fin) {
       if (Date.now() >= renovarEn) { await cliente.renovar(sus, 60); renovarEn = Date.now() + 30000; linea('  (suscripcion renovada)'); }
-      const msgs = await cliente.extraer(sus, { esperaS: Math.min(10, Math.max(1, Math.ceil((fin - Date.now()) / 1000))) });
+      const t0 = Date.now();
+      let msgs;
+      try {
+        msgs = await cliente.extraer(sus, { esperaS: Math.min(10, Math.max(1, Math.ceil((fin - Date.now()) / 1000))) });
+        contadores.consultas++;
+      } catch (e) {
+        if (!(e instanceof ErrorOnvif && e.transitorio) || contadores.cortesSeguidos >= 3) throw e;
+        contadores.cortes++; contadores.cortesSeguidos++;
+        linea(`  !! la camara cerro la conexion tras ${Date.now() - t0} ms (${e.causa}); se repite la espera (la suscripcion sigue viva)`);
+        await new Promise((r) => setTimeout(r, 300));
+        continue;
+      }
+      contadores.cortesSeguidos = 0;
       for (const m of msgs) {
         contadores.mensajes++;
         contadores.operaciones[m.operacion] = (contadores.operaciones[m.operacion] || 0) + 1;
@@ -87,7 +99,7 @@ async function main() {
   }
 
   console.log('\n===== Resumen =====');
-  console.log(`Mensajes recibidos: ${contadores.mensajes}`);
+  console.log(`Mensajes recibidos: ${contadores.mensajes} en ${contadores.consultas} consultas; cortes de conexion recuperados: ${contadores.cortes}`);
   console.log('PropertyOperation vistas:', JSON.stringify(contadores.operaciones));
   console.log('Valores vistos:', JSON.stringify(contadores.valores));
   const est = motor.estado('probar');

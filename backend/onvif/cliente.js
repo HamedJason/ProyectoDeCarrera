@@ -42,8 +42,10 @@ const ACCION = {
 const NS_EVENTOS = 'http://www.onvif.org/ver10/events/wsdl';
 
 class ErrorOnvif extends Error {
-  constructor(mensaje, { tipo = 'error', http = null, falla = null } = {}) {
+  constructor(mensaje, { tipo = 'error', http = null, falla = null, causa = null, transitorio = false } = {}) {
     super(mensaje);
+    this.causa = causa;            // codigo de red de Node, por ejemplo UND_ERR_SOCKET
+    this.transitorio = transitorio; // corte de conexion inmediato: vale la pena repetir la misma peticion
     this.name = 'ErrorOnvif';
     this.tipo = tipo;      // 'red' | 'http' | 'credenciales' | 'falla' | 'suscripcion_expirada' | 'formato'
     this.http = http;
@@ -134,7 +136,9 @@ class ClienteOnvif {
       crudo = await r.text();
     } catch (e) {
       const causa = e.cause && (e.cause.code || e.cause.message);
-      throw new ErrorOnvif(`Sin respuesta de la camara (${e.name === 'TimeoutError' ? 'tiempo agotado' : e.message}${causa ? `: ${causa}` : ''})`, { tipo: 'red' });
+      const agotado = e.name === 'TimeoutError';
+      throw new ErrorOnvif(`Sin respuesta de la camara (${agotado ? 'tiempo agotado' : e.message}${causa ? `: ${causa}` : ''})`,
+        { tipo: 'red', causa: causa || null, transitorio: !agotado && /^(UND_ERR_SOCKET|ECONNRESET|EPIPE)$/.test(String(causa || '')) });
     }
     if (this.registroXml) this.registroXml('<-', `${url} [HTTP ${r.status}]`, crudo);
 

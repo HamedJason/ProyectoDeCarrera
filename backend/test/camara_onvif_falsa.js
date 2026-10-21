@@ -24,7 +24,8 @@ function iniciarCamaraFalsa({ usuario = 'cam', clave = 'secreta', desfaseHoraMs 
     suscripciones: new Map(),        // id -> { expira, cola, esperando }
     contadores: { crear: 0, extraer: 0, renovar: 0, cancelar: 0, autenticacionFallida: 0, direcciones: [] },
     xmlRecibidos: [],
-    caida: false
+    caida: false,
+    cortarPulls: 0                   // cierra el socket en las proximas N esperas (la suscripcion sigue viva)
   };
   let siguienteId = 1;
   let puerto = 0;
@@ -137,6 +138,7 @@ function iniciarCamaraFalsa({ usuario = 'cam', clave = 'secreta', desfaseHoraMs 
 
       if (op === 'PullMessages') {
         e.contadores.extraer++;
+        if (e.cortarPulls > 0) { e.cortarPulls--; return req.socket.destroy(); }
         const seg = Number((datos.match(/PT(\d+)S/) || [])[1] || 1);
         const entregar = () => {
           const lote = sus.cola.splice(0, 20);
