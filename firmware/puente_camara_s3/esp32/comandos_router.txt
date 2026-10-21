@@ -1,0 +1,42 @@
+# Configuracion del ESP32-S3 con el firmware oficial esp32_nat_router (martin-ger).
+# Se pega linea por linea en la consola serie (115200) o en la consola remota.
+# Sintaxis tomada de la wiki oficial (CLI Reference y WiFi and Network).
+# Los valores <ENTRE_CORCHETES> se reemplazan; NO guardar claves reales en git.
+#
+# Los cambios se guardan solos en NVS. 'restart' aplica los que lo requieren.
+
+# 1) Uplink: el WiFi de tu casa (en 2.4 GHz). Fijar el canal del router en vez de "Auto".
+set_sta <SSID_ROUTER_CASA> <CLAVE_ROUTER_CASA>
+
+# 2) Red propia donde se conecta SOLO la camara.
+set_ap <SSID_PUENTE> <CLAVE_PUENTE_MIN_8_CARACTERES>
+
+# 3) IP fija para la camara (MAC en la etiqueta o en la app Tapo). No se usa el
+#    parametro de nombre: la wiki muestra dos sintaxis distintas ("-- nombre" y
+#    "-n nombre") y no hace falta para que funcione.
+dhcp_reserve add <MAC_MC210> 192.168.4.2
+
+# 4) Endurecimiento opcional: que solo se conecten dispositivos con reserva.
+#    Activar DESPUES de comprobar que la camara ya conecta.
+# set_ap_known_only
+
+# 5) Tunel WireGuard. NO escribir esta linea a mano: instalar_wireguard.sh la
+#    genera en el VPS (archivo /root/puente_esp32_comandos.txt) con las claves
+#    reales. Forma de la linea, para referencia:
+#      set_vpn <CLAVE_PRIVADA_ESP32> <CLAVE_PUBLICA_VPS> <IP_PUBLICA_VPS> 10.8.0.2 \
+#              -k <CLAVE_PRECOMPARTIDA> -p 51820 -a 25 -M 1380 -R 0 -e 1
+#    -a 25  keepalive (el ESP32 esta detras del NAT de tu router)
+#    -M 1380 MTU (igual que en el VPS; bajar a 1320 si el trafico se atasca)
+#    -R 0   divide el trafico: solo la subred del tunel va por WireGuard, el resto
+#           (por ejemplo la nube de Tapo) sale directo por tu router
+
+# 6) Reenvio de puertos DESDE el tunel hacia la camara (la opcion VPN hace que el
+#    puerto escuche en la IP del tunel, 10.8.0.2, y no en la del WiFi de casa).
+portmap add TCP 554 192.168.4.2 554 VPN
+portmap add TCP 2020 192.168.4.2 2020 VPN
+
+# 7) Aplicar y comprobar.
+restart
+# show status
+# show vpn
+# show mappings

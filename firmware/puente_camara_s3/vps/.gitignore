@@ -1,0 +1,5 @@
+# Credenciales y claves: nunca al repositorio
+puente.env
+*.key
+*.psk
+puente_esp32_comandos.txt
