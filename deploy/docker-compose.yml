@@ -54,6 +54,7 @@ services:
       # Notificaciones push por ntfy. Sin NTFY_TOPIC no se envian avisos.
       NTFY_URL: ${NTFY_URL:-https://ntfy.sh}
       NTFY_TOPIC: ${NTFY_TOPIC:-}
+      CORS_ORIGEN: ${CORS_ORIGEN:-}
       # Habilita el boton de borrar historial. Solo para la etapa de pruebas.
       MODO_PRUEBAS: ${MODO_PRUEBAS:-false}
       # Cuentas: con false solo se puede crear la primera cuenta y despues se

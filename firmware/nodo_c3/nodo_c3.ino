@@ -48,6 +48,8 @@
 #include <WiFi.h>
 #include <Preferences.h>
 #include <esp_now.h>
+#include <mbedtls/md.h>
+#include <mbedtls/sha256.h>
 #include <esp_wifi.h>
 #include <esp_idf_version.h>
 #include <esp_sleep.h>
@@ -90,13 +92,21 @@ const int PIN_LED = -1;   // LED de enlace opcional (-1 si no hay)
 
 // Ahorro de energia (ver arriba)
 const bool USAR_SUENO = true;
+
+// Modo de medicion: pensado para probar con el cable USB conectado. No duerme
+// (el USB se caeria al dormir): en lugar de eso espera despierto y, en cada sesion
+// de radio, imprime cuanto duro encenderla, transmitir y apagarla, y con eso
+// estima el consumo promedio. Las corrientes de abajo son tipicas del ESP32-C3;
+// sustituyelas por las que midas con un multimetro (I_DORMIDO_MA) o un medidor.
+const bool MODO_MEDICION = false;
+const float I_ACTIVO_MA = 70.0;    // radio encendida y transmitiendo
+const float I_DORMIDO_MA = 0.17;   // suspension ligera
 const bool PULLUP_EXTERNO = false;   // true si cada contacto lleva 1 Mohm a 3V3
 
-// Cifrado ESP-NOW opcional; debe coincidir con el concentrador. Las claves estan
-// en el repositorio, asi que cambialas por otras de 16 caracteres si lo activas.
-const bool USAR_CIFRADO = false;
-const char* CLAVE_PMK = "pmk-uabc-2026-a1";
-const char* CLAVE_LMK = "lmk-uabc-2026-b2";
+// Cifrado y firma de ESP-NOW; debe coincidir con el concentrador. La llave NO
+// esta en el codigo: se carga por consola con el comando llave y vive en la
+// flash. Si no hay llave guardada, el nodo funciona sin cifrar y lo avisa.
+const bool USAR_CIFRADO = true;
 
 // ===================== Parametros =====================
 
@@ -139,6 +149,7 @@ struct __attribute__((packed)) PaqueteSensor {
   char     variable[16];  // "estado_puerta" o "movimiento"
   char     zona[16];
   int8_t   valor;
+  uint8_t  tag[8];        // firma HMAC-SHA256 recortada
 };
 
 const uint8_t MAC_BROADCAST[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
@@ -160,6 +171,105 @@ int  pirPrevio = LOW;
 unsigned long tUltimoPir = 0;
 
 Preferences prefs;
+
+// ===================== Seguridad =====================
+// Una sola llave de 16 bytes por instalacion, guardada en la flash y nunca en el
+// codigo. De ella salen la PMK, la LMK de cada nodo y la llave de las firmas.
+// Cada paquete lleva una firma HMAC-SHA256 recortada a 8 bytes. Sin llave el
+// sistema sigue funcionando sin cifrar (solo para pruebas) y lo avisa.
+const size_t LARGO_TAG = 8;
+uint8_t llaveMaestra[16];
+uint8_t pmkDerivada[16];
+uint8_t llaveFirma[32];
+bool cifradoActivo = false;
+
+void derivarLlave(const char* etiqueta, const uint8_t* extra, size_t nExtra, uint8_t* salida32) {
+  uint8_t buf[40];
+  size_t n = 16;
+  memcpy(buf, llaveMaestra, 16);
+  size_t l = strlen(etiqueta);
+  memcpy(buf + n, etiqueta, l); n += l;
+  if (extra && nExtra) { memcpy(buf + n, extra, nExtra); n += nExtra; }
+  mbedtls_sha256(buf, n, salida32, 0);
+}
+
+// LMK de un nodo: depende de la llave y de la MAC de ese nodo
+void lmkDeNodo(const uint8_t* macNodo, uint8_t* lmk16) {
+  uint8_t h[32];
+  derivarLlave("lmk", macNodo, 6, h);
+  memcpy(lmk16, h, 16);
+}
+
+bool hmacPaquete(const PaqueteSensor* p, uint8_t* tag8) {
+  uint8_t h[32];
+  const mbedtls_md_info_t* info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+  if (mbedtls_md_hmac(info, llaveFirma, 32, (const uint8_t*)p, sizeof(PaqueteSensor) - LARGO_TAG, h) != 0) return false;
+  memcpy(tag8, h, LARGO_TAG);
+  return true;
+}
+
+void firmarPaquete(PaqueteSensor* p) {
+  memset(p->tag, 0, LARGO_TAG);
+  if (!cifradoActivo) return;
+  hmacPaquete(p, p->tag);
+}
+
+// Comparacion de tiempo constante
+bool paqueteAutentico(const PaqueteSensor* p) {
+  if (!cifradoActivo) return true;
+  uint8_t esperado[8];
+  if (!hmacPaquete(p, esperado)) return false;
+  uint8_t d = 0;
+  for (size_t i = 0; i < LARGO_TAG; i++) d |= esperado[i] ^ p->tag[i];
+  return d == 0;
+}
+
+void cargarLlave() {
+  cifradoActivo = false;
+  if (!USAR_CIFRADO) {
+    Serial.println("[Seguridad] Cifrado desactivado en el codigo (USAR_CIFRADO).");
+    return;
+  }
+  if (prefs.getBytesLength("llave") != 16) {
+    Serial.println("[Seguridad] AVISO: sin llave. Los paquetes van SIN cifrar ni firmar. Usa el comando llave.");
+    return;
+  }
+  prefs.getBytes("llave", llaveMaestra, 16);
+  uint8_t h[32];
+  derivarLlave("pmk", nullptr, 0, h);
+  memcpy(pmkDerivada, h, 16);
+  derivarLlave("mac", nullptr, 0, llaveFirma);
+  cifradoActivo = true;
+  Serial.println("[Seguridad] Cifrado y firma de paquetes activos.");
+}
+
+int nibbleHex(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  return -1;
+}
+
+// Guarda una llave escrita como 32 digitos hexadecimales
+bool guardarLlaveHex(const String& hex) {
+  if (hex.length() != 32) return false;
+  uint8_t k[16];
+  for (int i = 0; i < 16; i++) {
+    int a = nibbleHex(hex[2 * i]), b = nibbleHex(hex[2 * i + 1]);
+    if (a < 0 || b < 0) return false;
+    k[i] = (uint8_t)(a * 16 + b);
+  }
+  prefs.putBytes("llave", k, 16);
+  return true;
+}
+
+String llaveComoHex() {
+  uint8_t k[16];
+  if (prefs.getBytes("llave", k, 16) != 16) return String("");
+  char t[33];
+  for (int i = 0; i < 16; i++) snprintf(t + 2 * i, 3, "%02x", k[i]);
+  return String(t);
+}
 uint8_t hubMac[6];          // MAC del concentrador, guardada al emparejar
 bool hubGuardado = false;
 
@@ -179,7 +289,16 @@ int  canalHub = 0;                  // canal en el que se encontro al concentrad
 unsigned long intervaloBusqueda = INTERVALO_BUSQUEDA_MS;
 bool hubo_envio = false;            // hubo envios en este ciclo y falta oir la respuesta
 
+// Modo de medicion
+unsigned long tRadioInicio = 0;
+unsigned long msRadioListo = 0;
+unsigned long sesionesMedidas = 0;
+unsigned long acumActivoMs = 0;
+unsigned long acumDormidoMs = 0;
+int paquetesSesion = 0;
+
 uint32_t secuencia = 0;
+volatile uint32_t ultimaSecEnviada = 0;   // las respuestas del concentrador deben repetirla
 
 // Resultado del ultimo envio, que llega en la funcion de confirmacion
 volatile bool envioTerminado = false;
@@ -238,10 +357,13 @@ void procesarRecepcion(const uint8_t* mac, const uint8_t* datos, int largo) {
   if (largo != (int)sizeof(PaqueteSensor)) return;
   const PaqueteSensor* p = (const PaqueteSensor*)datos;
   if (p->magia[0] != 'S' || p->magia[1] != 'R' || p->version != 1) return;
+  if (!paqueteAutentico(p)) return;   // firma invalida: se ignora
 
-  // Estado de armado: solo del concentrador al que se esta enlazado
+  // Estado de armado: solo del concentrador al que se esta enlazado, y solo
+  // como respuesta a lo ultimo que se envio (evita reenvios de respuestas viejas)
   if (p->tipo == TIPO_ARMADO) {
-    if (hubGuardado && memcmp(mac, hubMac, 6) == 0 && strncmp(p->variable, macPropia, 12) == 0) {
+    if (hubGuardado && memcmp(mac, hubMac, 6) == 0 && strncmp(p->variable, macPropia, 12) == 0 &&
+        p->secuencia == ultimaSecEnviada) {
       armadoValor = p->valor;
       armadoRecibido = true;
     }
@@ -251,6 +373,7 @@ void procesarRecepcion(const uint8_t* mac, const uint8_t* datos, int largo) {
   if (hubGuardado) return;
   if (p->tipo != TIPO_RESPUESTA) return;
   if (strncmp(p->variable, macPropia, 12) != 0) return;
+  if (p->secuencia != ultimaSecEnviada) return;   // debe contestar a nuestra peticion
   memcpy(macRespuesta, mac, 6);
   respuestaRecibida = true;
 }
@@ -272,8 +395,12 @@ bool registrarHub() {
   memcpy(par.peer_addr, hubMac, 6);
   par.channel = 0;   // 0 = el canal actual, que cambia al buscar
   par.ifidx = WIFI_IF_STA;
-  par.encrypt = USAR_CIFRADO;
-  if (USAR_CIFRADO) memcpy(par.lmk, CLAVE_LMK, 16);
+  par.encrypt = cifradoActivo;
+  if (cifradoActivo) {
+    uint8_t propia[6];
+    esp_read_mac(propia, ESP_MAC_WIFI_STA);
+    lmkDeNodo(propia, par.lmk);   // la misma LMK que deriva el concentrador para este nodo
+  }
   return esp_now_add_peer(&par) == ESP_OK;
 }
 
@@ -287,7 +414,7 @@ bool iniciarEspNow() {
     Serial.println("[ESP-NOW] No se pudo iniciar.");
     return false;
   }
-  if (USAR_CIFRADO) esp_now_set_pmk((const uint8_t*)CLAVE_PMK);
+  if (cifradoActivo) esp_now_set_pmk(pmkDerivada);
   esp_now_register_send_cb(alEnviar);
   esp_now_register_recv_cb(alRecibir);
 
@@ -326,7 +453,10 @@ void llenarPaquete(PaqueteSensor &p, uint8_t tipo, const char* sensorId,
 bool enviarUnaVez(const PaqueteSensor &p) {
   envioTerminado = false;
   envioOk = false;
-  if (esp_now_send(hubMac, (const uint8_t*)&p, sizeof(p)) != ESP_OK) return false;
+  PaqueteSensor f = p;           // copia firmada: el original queda en la cola
+  firmarPaquete(&f);
+  ultimaSecEnviada = f.secuencia;
+  if (esp_now_send(hubMac, (const uint8_t*)&f, sizeof(f)) != ESP_OK) return false;
   unsigned long t0 = millis();
   while (!envioTerminado && millis() - t0 < ESPERA_CONFIRMACION_MS) delay(1);
   return envioTerminado && envioOk;
@@ -365,6 +495,8 @@ bool buscarEmparejamiento() {
     esp_wifi_set_channel(c, WIFI_SECOND_CHAN_NONE);
     delay(5);
     llenarPaquete(req, TIPO_EMPAREJAR, "-", "-", "-", 0);
+    firmarPaquete(&req);
+    ultimaSecEnviada = req.secuencia;
     esp_now_send(MAC_BROADCAST, (const uint8_t*)&req, sizeof(req));
     unsigned long t0 = millis();
     while (!respuestaRecibida && millis() - t0 < ESPERA_RESPUESTA_MS) delay(1);
@@ -377,9 +509,12 @@ bool buscarEmparejamiento() {
 
 bool radioEncender() {
   if (radioActiva) return true;
+  tRadioInicio = millis();
+  paquetesSesion = 0;
   if (!iniciarEspNow()) return false;
   if (canalHub > 0) esp_wifi_set_channel(canalHub, WIFI_SECOND_CHAN_NONE);
   radioActiva = true;
+  msRadioListo = millis() - tRadioInicio;
   return true;
 }
 
@@ -388,6 +523,18 @@ void radioApagar() {
   esp_now_deinit();
   WiFi.mode(WIFI_OFF);
   radioActiva = false;
+
+  if (MODO_MEDICION) {
+    unsigned long dur = millis() - tRadioInicio;
+    sesionesMedidas++;
+    acumActivoMs += dur;
+    unsigned long total = acumActivoMs + acumDormidoMs;
+    float prom = total ? (acumActivoMs * I_ACTIVO_MA + acumDormidoMs * I_DORMIDO_MA) / total : 0;
+    Serial.printf("[Medicion] sesion %lu: radio lista en %lu ms, paquetes %d, sesion total %lu ms\n",
+                  sesionesMedidas, msRadioListo, paquetesSesion, dur);
+    Serial.printf("[Medicion] despierto %.2f %% del tiempo, consumo promedio estimado %.3f mA\n",
+                  total ? 100.0 * acumActivoMs / total : 0.0, prom);
+  }
 }
 
 void aplicarArmado() {
@@ -468,6 +615,7 @@ void vaciarCola() {
 
     fallosSeguidos = 0;
     hubo_envio = true;
+    paquetesSesion++;
     // Cualquier paquete demuestra que el nodo esta vivo: se pospone el latido
     tUltimoLatido = millis() ? millis() : 1;
     Serial.print("[Envio] ");
@@ -492,6 +640,7 @@ void mostrarEstado() {
   Serial.print("Concentrador: ");
   Serial.println(hubGuardado ? macATexto(hubMac) : String("sin emparejar"));
   Serial.print("Enlace:       "); Serial.println(enlazado ? "activo" : "buscando");
+  Serial.print("Cifrado:      "); Serial.println(cifradoActivo ? "activo (llave guardada)" : "INACTIVO (sin llave)");
   Serial.print("En cola:      "); Serial.println(colaTam);
   Serial.println("----------------------------");
 }
@@ -510,10 +659,25 @@ void ejecutarComando(String linea) {
     enlazado = false;
     rondasEmparejar = 0;
     Serial.println("Concentrador olvidado. Escribe emparejar en el concentrador.");
+  } else if (linea.startsWith("llave")) {
+    String a = linea.substring(5);
+    a.trim();
+    if (a == "borrar") {
+      prefs.remove("llave");
+      Serial.println("Llave borrada. Reiniciando (quedara sin cifrar).");
+      delay(300);
+      ESP.restart();
+    } else if (guardarLlaveHex(a)) {
+      Serial.println("Llave guardada. Reiniciando.");
+      delay(300);
+      ESP.restart();
+    } else {
+      Serial.println("Uso: llave 32_digitos_hex (la que muestra el concentrador) | llave borrar");
+    }
   } else if (linea == "reiniciar") {
     ESP.restart();
   } else if (linea == "ayuda" || linea == "help" || linea == "?") {
-    Serial.println("Comandos: ver, olvidar (volver a emparejar), reiniciar");
+    Serial.println("Comandos: ver, olvidar (volver a emparejar), llave, reiniciar");
   } else {
     Serial.println("Comando no reconocido. Escribe ayuda.");
   }
@@ -559,7 +723,6 @@ void setup() {
     tCambioContacto[i] = 0;
   }
 
-  secuencia = esp_random();   // evita repetir numeros tras un reinicio
   armarIdentificadores();
 
   prefs.begin("nodo", false);
@@ -567,6 +730,15 @@ void setup() {
     prefs.getBytes("hub", hubMac, 6);
     hubGuardado = true;
   }
+
+  // La secuencia nunca retrocede entre reinicios: los 12 bits altos son un
+  // contador de arranques guardado en flash. Asi el concentrador puede descartar
+  // cualquier paquete con secuencia menor (anti-replay) sin rechazar al nodo.
+  uint32_t arranques = prefs.getUInt("arranques", 0) + 1;
+  prefs.putUInt("arranques", arranques);
+  secuencia = (arranques & 0xFFF) << 20;
+
+  cargarLlave();
 
   Serial.println();
   Serial.println("==========================================");
@@ -742,5 +914,12 @@ void loop() {
 
   radioApagar();
   indicarLed(false);
-  dormir(limite, vigilarPir);
+  if (MODO_MEDICION) {
+    // Sin dormir, para no perder el USB; ese tiempo se cuenta como "dormido"
+    unsigned long espera = limite > 2000 ? 2000 : limite;
+    delay(espera);
+    acumDormidoMs += espera;
+  } else {
+    dormir(limite, vigilarPir);
+  }
 }

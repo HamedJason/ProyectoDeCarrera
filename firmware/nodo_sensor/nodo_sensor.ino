@@ -27,6 +27,8 @@
 #include "raiz_tls.h"
 #include <ArduinoJson.h>
 #include <esp_now.h>
+#include <mbedtls/md.h>
+#include <mbedtls/sha256.h>
 #include <esp_idf_version.h>
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
 #include <esp_mac.h>
@@ -48,11 +50,10 @@ const bool USAR_SENSORES_LOCALES = false;
 // diagnostico: cifra pero no comprueba quien responde.
 const bool HTTPS_VERIFICAR = true;
 
-// Cifrado ESP-NOW opcional; debe coincidir con nodo_c3.ino. Las claves estan
-// en el repositorio, asi que cambialas por otras de 16 caracteres si lo activas.
-const bool USAR_CIFRADO = false;
-const char* CLAVE_PMK = "pmk-uabc-2026-a1";
-const char* CLAVE_LMK = "lmk-uabc-2026-b2";
+// Cifrado y firma de ESP-NOW; debe coincidir con nodo_c3.ino. La llave NO esta
+// en el codigo: se carga por consola con el comando llave y vive en la flash.
+// Si no hay llave guardada, el sistema funciona sin cifrar y lo avisa.
+const bool USAR_CIFRADO = true;
 
 // ===================== Hardware =====================
 
@@ -113,6 +114,7 @@ struct __attribute__((packed)) PaqueteSensor {
   char     variable[16];
   char     zona[16];
   int8_t   valor;
+  uint8_t  tag[8];        // firma HMAC-SHA256 recortada
 };
 
 struct OrigenRemoto { uint8_t mac[6]; uint32_t ultimaSecuencia; bool usado; };
@@ -135,6 +137,105 @@ const uint8_t MAC_BROADCAST[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 // ===================== Configuracion guardada =====================
 
 Preferences prefs;
+
+// ===================== Seguridad =====================
+// Una sola llave de 16 bytes por instalacion, guardada en la flash y nunca en el
+// codigo. De ella salen la PMK, la LMK de cada nodo y la llave de las firmas.
+// Cada paquete lleva una firma HMAC-SHA256 recortada a 8 bytes. Sin llave el
+// sistema sigue funcionando sin cifrar (solo para pruebas) y lo avisa.
+const size_t LARGO_TAG = 8;
+uint8_t llaveMaestra[16];
+uint8_t pmkDerivada[16];
+uint8_t llaveFirma[32];
+bool cifradoActivo = false;
+
+void derivarLlave(const char* etiqueta, const uint8_t* extra, size_t nExtra, uint8_t* salida32) {
+  uint8_t buf[40];
+  size_t n = 16;
+  memcpy(buf, llaveMaestra, 16);
+  size_t l = strlen(etiqueta);
+  memcpy(buf + n, etiqueta, l); n += l;
+  if (extra && nExtra) { memcpy(buf + n, extra, nExtra); n += nExtra; }
+  mbedtls_sha256(buf, n, salida32, 0);
+}
+
+// LMK de un nodo: depende de la llave y de la MAC de ese nodo
+void lmkDeNodo(const uint8_t* macNodo, uint8_t* lmk16) {
+  uint8_t h[32];
+  derivarLlave("lmk", macNodo, 6, h);
+  memcpy(lmk16, h, 16);
+}
+
+bool hmacPaquete(const PaqueteSensor* p, uint8_t* tag8) {
+  uint8_t h[32];
+  const mbedtls_md_info_t* info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+  if (mbedtls_md_hmac(info, llaveFirma, 32, (const uint8_t*)p, sizeof(PaqueteSensor) - LARGO_TAG, h) != 0) return false;
+  memcpy(tag8, h, LARGO_TAG);
+  return true;
+}
+
+void firmarPaquete(PaqueteSensor* p) {
+  memset(p->tag, 0, LARGO_TAG);
+  if (!cifradoActivo) return;
+  hmacPaquete(p, p->tag);
+}
+
+// Comparacion de tiempo constante
+bool paqueteAutentico(const PaqueteSensor* p) {
+  if (!cifradoActivo) return true;
+  uint8_t esperado[8];
+  if (!hmacPaquete(p, esperado)) return false;
+  uint8_t d = 0;
+  for (size_t i = 0; i < LARGO_TAG; i++) d |= esperado[i] ^ p->tag[i];
+  return d == 0;
+}
+
+void cargarLlave() {
+  cifradoActivo = false;
+  if (!USAR_CIFRADO) {
+    Serial.println("[Seguridad] Cifrado desactivado en el codigo (USAR_CIFRADO).");
+    return;
+  }
+  if (prefs.getBytesLength("llave") != 16) {
+    Serial.println("[Seguridad] AVISO: sin llave. Los paquetes van SIN cifrar ni firmar. Usa el comando llave.");
+    return;
+  }
+  prefs.getBytes("llave", llaveMaestra, 16);
+  uint8_t h[32];
+  derivarLlave("pmk", nullptr, 0, h);
+  memcpy(pmkDerivada, h, 16);
+  derivarLlave("mac", nullptr, 0, llaveFirma);
+  cifradoActivo = true;
+  Serial.println("[Seguridad] Cifrado y firma de paquetes activos.");
+}
+
+int nibbleHex(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  return -1;
+}
+
+// Guarda una llave escrita como 32 digitos hexadecimales
+bool guardarLlaveHex(const String& hex) {
+  if (hex.length() != 32) return false;
+  uint8_t k[16];
+  for (int i = 0; i < 16; i++) {
+    int a = nibbleHex(hex[2 * i]), b = nibbleHex(hex[2 * i + 1]);
+    if (a < 0 || b < 0) return false;
+    k[i] = (uint8_t)(a * 16 + b);
+  }
+  prefs.putBytes("llave", k, 16);
+  return true;
+}
+
+String llaveComoHex() {
+  uint8_t k[16];
+  if (prefs.getBytes("llave", k, 16) != 16) return String("");
+  char t[33];
+  for (int i = 0; i < 16; i++) snprintf(t + 2 * i, 3, "%02x", k[i]);
+  return String(t);
+}
 String cfgSsid, cfgClave, cfgToken, cfgServidor, cfgVivienda;
 
 // MACs de los C3 emparejados (se guardan en la flash)
@@ -656,17 +757,20 @@ void responderEmparejamiento(const uint8_t* mac, const PaqueteSensor* peticion) 
   r.magia[1] = 'R';
   r.version = 1;
   r.tipo = TIPO_RESPUESTA;
+  r.secuencia = peticion->secuencia;   // el C3 comprueba que contesta a SU peticion
   strncpy(r.nodoId, NODO_ID, sizeof(r.nodoId) - 1);
   snprintf(r.variable, sizeof(r.variable), "%02X%02X%02X%02X%02X%02X",
            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  firmarPaquete(&r);
   esp_now_send(MAC_BROADCAST, (const uint8_t*)&r, sizeof(r));
 }
 
 // Los C3 duermen casi todo el tiempo y solo escuchan un instante despues de
 // transmitir. Por eso la respuesta con el estado de armado sale de inmediato,
-// desde la propia funcion de recepcion, y por broadcast (no exige registrar
-// cada C3 como par). El C3 la reconoce por la MAC que va en "variable".
-void responderArmado(const uint8_t* mac) {
+// desde la propia funcion de recepcion. Con cifrado va dirigida (unicast
+// cifrado) solo a ese C3 y firmada; sin llave sale por broadcast como antes.
+// Repite la secuencia de la peticion para que no sirva una respuesta antigua.
+void responderArmado(const uint8_t* mac, uint32_t secuencia) {
   if (!armadoConocido) return;   // el C3 conserva su ultimo valor (por defecto, armado)
   PaqueteSensor r;
   memset(&r, 0, sizeof(r));
@@ -674,17 +778,25 @@ void responderArmado(const uint8_t* mac) {
   r.magia[1] = 'R';
   r.version = 1;
   r.tipo = TIPO_ARMADO;
+  r.secuencia = secuencia;
   strncpy(r.nodoId, NODO_ID, sizeof(r.nodoId) - 1);
   snprintf(r.variable, sizeof(r.variable), "%02X%02X%02X%02X%02X%02X",
            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
   r.valor = sistemaArmado ? 1 : 0;
-  esp_now_send(MAC_BROADCAST, (const uint8_t*)&r, sizeof(r));
+  firmarPaquete(&r);
+  if (cifradoActivo) {
+    if (!esp_now_is_peer_exist(mac)) return;   // solo nodos emparejados
+    esp_now_send(mac, (const uint8_t*)&r, sizeof(r));
+  } else {
+    esp_now_send(MAC_BROADCAST, (const uint8_t*)&r, sizeof(r));
+  }
 }
 
 void guardarPaqueteRx(const uint8_t* mac, const uint8_t* datos, int largo, int rssi) {
   if (largo != (int)sizeof(PaqueteSensor)) return;
   const PaqueteSensor* p = (const PaqueteSensor*)datos;
   if (p->magia[0] != 'S' || p->magia[1] != 'R' || p->version != 1) return;
+  if (!paqueteAutentico(p)) return;   // firma invalida: no se emparejan ni se atienden
 
   if (p->tipo == TIPO_EMPAREJAR) { responderEmparejamiento(mac, p); return; }
   if (p->tipo == TIPO_RESPUESTA || p->tipo == TIPO_ARMADO) return;
@@ -693,7 +805,7 @@ void guardarPaqueteRx(const uint8_t* mac, const uint8_t* datos, int largo, int r
     hayDesconocido = true;
     return;
   }
-  if (p->tipo == TIPO_EVENTO || p->tipo == TIPO_ESTADO || p->tipo == TIPO_HOLA) responderArmado(mac);
+  if (p->tipo == TIPO_EVENTO || p->tipo == TIPO_ESTADO || p->tipo == TIPO_HOLA) responderArmado(mac, p->secuencia);
 
   int sig = (rxEscribir + 1) % CAP_COLA_RX;
   if (sig == rxLeer) return;   // cola llena: el nodo reintentara
@@ -714,19 +826,22 @@ void alRecibirEspNow(const uint8_t* mac, const uint8_t* datos, int largo) {
 }
 #endif
 
-// Los reintentos de un nodo llegan con la misma secuencia; se descartan
-// comparando con la ultima aceptada de cada origen.
-OrigenRemoto origenes[4];
+// Anti-replay: los reintentos de un nodo repiten la secuencia y se descartan;
+// tambien se descarta cualquier secuencia MENOR que la ultima aceptada, asi un
+// paquete grabado y reenviado despues no vale. Al reiniciar el concentrador la
+// tabla queda vacia y se vuelve a aprender.
+const int MAX_ORIGENES = 8;
+OrigenRemoto origenes[MAX_ORIGENES];
 
 bool esDuplicado(const uint8_t* mac, uint32_t secuencia) {
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < MAX_ORIGENES; i++) {
     if (origenes[i].usado && memcmp(origenes[i].mac, mac, 6) == 0) {
-      if (origenes[i].ultimaSecuencia == secuencia) return true;
+      if (secuencia <= origenes[i].ultimaSecuencia) return true;
       origenes[i].ultimaSecuencia = secuencia;
       return false;
     }
   }
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < MAX_ORIGENES; i++) {
     if (!origenes[i].usado) {
       origenes[i].usado = true;
       memcpy(origenes[i].mac, mac, 6);
@@ -734,7 +849,7 @@ bool esDuplicado(const uint8_t* mac, uint32_t secuencia) {
       return false;
     }
   }
-  return false;   // tabla llena: se acepta sin deduplicar
+  return true;   // tabla llena: se descarta en vez de aceptar sin comprobar
 }
 
 // Ultimo estado de cada sensor remoto: el primero se registra sin disparar
@@ -995,6 +1110,7 @@ void mostrarConfig() {
   Serial.print("Token:      "); Serial.println(enmascarar(cfgToken, 6));
   Serial.print("Vivienda:   "); Serial.println(cfgVivienda);
   Serial.print("Nodos C3:   "); Serial.println(numPareados);
+  Serial.print("Cifrado:    "); Serial.println(cifradoActivo ? "activo (llave guardada)" : "INACTIVO (sin llave)");
   Serial.println("-----------------------------------");
 }
 
@@ -1009,6 +1125,7 @@ void mostrarAyuda() {
   Serial.println("  emparejar        abre 2 min para enlazar C3 (emparejar cancelar)");
   Serial.println("  nodos            lista los C3 emparejados");
   Serial.println("  olvidarnodos     borra todos los emparejamientos");
+  Serial.println("  llave nueva      genera la llave de cifrado (tambien: mostrar, borrar, o 32 digitos hex)");
   Serial.println("  ver              muestra la configuracion");
   Serial.println("  borrar           borra todo lo guardado y reinicia");
   Serial.println("  reiniciar");
@@ -1069,6 +1186,35 @@ void ejecutarComando(String linea) {
     numPareados = 0;
     guardarNodos();
     Serial.println("Emparejamientos borrados.");
+  } else if (cmd == "llave") {
+    String a = arg; a.toLowerCase();
+    if (a == "nueva") {
+      uint8_t k[16];
+      esp_fill_random(k, 16);
+      char t[33];
+      for (int i = 0; i < 16; i++) snprintf(t + 2 * i, 3, "%02x", k[i]);
+      prefs.putBytes("llave", k, 16);
+      Serial.println("Llave nueva guardada. Escribela en cada nodo C3 con: llave <32 digitos>");
+      Serial.print("Llave: "); Serial.println(t);
+      Serial.println("Reiniciando. Despues haz emparejar de nuevo en los nodos.");
+      delay(300);
+      ESP.restart();
+    } else if (a == "mostrar") {
+      String h = llaveComoHex();
+      if (h.length()) { Serial.print("Llave: "); Serial.println(h); }
+      else Serial.println("No hay llave guardada.");
+    } else if (a == "borrar") {
+      prefs.remove("llave");
+      Serial.println("Llave borrada. Reiniciando (quedara sin cifrar).");
+      delay(300);
+      ESP.restart();
+    } else if (guardarLlaveHex(a)) {
+      Serial.println("Llave guardada. Reiniciando.");
+      delay(300);
+      ESP.restart();
+    } else {
+      Serial.println("Uso: llave nueva | llave mostrar | llave 32_digitos_hex | llave borrar");
+    }
   } else if (cmd == "ver") {
     mostrarConfig();
   } else if (cmd == "borrar") {
@@ -1112,7 +1258,7 @@ void avisarConfigIncompleta() {
 
 // Con cifrado, cada C3 emparejado se registra como par cifrado
 void registrarPares() {
-  if (!USAR_CIFRADO) return;
+  if (!cifradoActivo) return;
   for (int i = 0; i < numPareados; i++) {
     if (esp_now_is_peer_exist(pareados[i])) continue;
     esp_now_peer_info_t par = {};
@@ -1120,7 +1266,7 @@ void registrarPares() {
     par.channel = 0;
     par.ifidx = WIFI_IF_STA;
     par.encrypt = true;
-    memcpy(par.lmk, CLAVE_LMK, 16);
+    lmkDeNodo(pareados[i], par.lmk);   // LMK propia de cada nodo
     if (esp_now_add_peer(&par) != ESP_OK) Serial.printf("[ESP-NOW] No se pudo registrar el nodo %d cifrado.\n", i + 1);
   }
 }
@@ -1132,7 +1278,7 @@ void iniciarEspNow() {
     Serial.println("[ESP-NOW] No se pudo iniciar. No se recibiran nodos C3.");
     return;
   }
-  if (USAR_CIFRADO) esp_now_set_pmk((const uint8_t*)CLAVE_PMK);
+  if (cifradoActivo) esp_now_set_pmk(pmkDerivada);
 
   // Par de broadcast: con el se contesta a los C3 que piden emparejarse
   esp_now_peer_info_t bc = {};
@@ -1171,6 +1317,7 @@ void setup() {
   }
 
   cargarConfig();
+  cargarLlave();
 
   Serial.println();
   Serial.println("==========================================");

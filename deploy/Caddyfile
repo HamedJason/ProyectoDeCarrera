@@ -12,6 +12,9 @@ privadaochil.ddns.net {
 	# resuelve dentro de su red interna.
 	reverse_proxy backend:3000
 
+	# Obliga a los navegadores a usar siempre HTTPS con este dominio.
+	header Strict-Transport-Security "max-age=31536000"
+
 	# Registro de accesos, útil para comprobar que el ESP32 está llegando.
 	log {
 		output file /data/acceso.log

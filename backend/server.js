@@ -38,6 +38,11 @@ if (!process.env.DEVICE_TOKEN) {
 // leer los avisos, por eso debe ser largo y dificil de adivinar.
 const NTFY_URL = (process.env.NTFY_URL || 'https://ntfy.sh').replace(/\/+$/, '');
 const NTFY_TOPIC = process.env.NTFY_TOPIC || '';
+// El nombre del tema es lo unico que protege los avisos de ntfy: cualquiera que
+// lo conozca puede leerlos o publicar en el.
+if (NTFY_TOPIC && NTFY_TOPIC.length < 20) {
+  console.warn('[Seguridad] NTFY_TOPIC es corto y facil de adivinar. Usa uno largo y aleatorio (20 caracteres o mas).');
+}
 
 // Habilita funciones que solo tienen sentido durante las pruebas, como borrar
 // el historial. Debe estar apagado cuando el sistema quede en uso real.
@@ -58,7 +63,10 @@ app.use((_req, res, next) => {
   next();
 });
 
-app.use(cors());
+// La interfaz web se sirve desde este mismo servidor, asi que no hace falta CORS.
+// Solo se permite a otros origenes si se listan en CORS_ORIGEN (separados por coma).
+const ORIGENES_CORS = (process.env.CORS_ORIGEN || '').split(',').map((o) => o.trim()).filter(Boolean);
+app.use(cors({ origin: ORIGENES_CORS.length ? ORIGENES_CORS : false }));
 app.use(express.json({ limit: '100kb' }));
 app.use(auth.cargarSesion);
 app.use(auth.verificarOrigen);
