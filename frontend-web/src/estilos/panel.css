@@ -1,0 +1,59 @@
+/* ---- Barra superior ---- */
+.barra {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 6px 2px 14px;
+}
+.vivienda { font-weight: 700; font-size: 17px; letter-spacing: -0.01em; }
+.conexion { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--tinta-2); }
+.punto-vivo { width: 8px; height: 8px; border-radius: 50%; background: var(--pino); flex-shrink: 0; }
+.punto-vivo.muerto { background: var(--sirena); }
+
+/* ---- Aviso de comunicacion ---- */
+#aviso {
+  display: none;
+  background: var(--sirena-claro);
+  border-left: 4px solid var(--sirena);
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  font-size: 14px;
+}
+#aviso.visible { display: block; }
+#aviso button {
+  margin-top: 8px; background: none; border: none; padding: 0;
+  color: var(--sirena); font-weight: 700; text-decoration: underline; cursor: pointer;
+}
+
+/* ---- Escena: titular, plano y controles ---- */
+.escena {
+  background: var(--papel);
+  border: 1px solid var(--linea);
+  border-radius: 22px;
+  padding: 22px 18px 18px;
+  margin-bottom: 26px;
+  transition: background-color .3s, border-color .3s;
+}
+.escena.alarma { background: var(--sirena-claro); border-color: var(--sirena); }
+
+.titular {
+  margin: 0;
+  font-size: clamp(31px, 8.6vw, 42px);
+  font-weight: 800;
+  font-stretch: 86%;
+  line-height: 1.02;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+.escena.alarma .titular { color: var(--sirena); }
+.subtitular { margin: 8px 0 0; font-size: 15px; color: var(--tinta-2); min-height: 1.45em; }
+
+/* ---- Grupos de sensores ---- */
+.grupo-cab { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 28px 0 0; }
+.grupo-cab h2 { margin: 0; }
+.grupo-cab .cuenta { font-size: 13px; color: var(--tinta-2); font-variant-numeric: tabular-nums; }
+.rejilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-top: 12px; }
+.grupo[hidden] { display: none; }
+.sin-sensores { margin: 26px 0 0; padding: 22px 18px; border: 1.5px dashed var(--linea); border-radius: 18px; color: var(--tinta-2); font-size: 15px; }
+.sin-sensores strong { color: var(--tinta); }
+.agregar { margin-top: 14px; width: 100%; border-style: dashed; padding: 12px 14px; }
+

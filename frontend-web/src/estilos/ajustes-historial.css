@@ -1,0 +1,67 @@
+/* ---- Ajustes ---- */
+.fila {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 14px 2px; border-bottom: 1px solid var(--linea);
+}
+.fila:first-of-type { border-top: 1px solid var(--linea); }
+.fila[hidden] { display: none; }
+.fila .titulo { font-weight: 600; font-size: 16px; }
+.fila .nota { font-size: 13px; color: var(--tinta-2); margin-top: 2px; max-width: 34ch; }
+
+.interruptor {
+  position: relative; width: 52px; height: 30px; flex-shrink: 0; padding: 0;
+  background: #B9C6BF; border: none; border-radius: 999px; cursor: pointer;
+  transition: background-color .2s;
+}
+.interruptor::after {
+  content: ""; position: absolute; top: 3px; left: 3px;
+  width: 24px; height: 24px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 2px rgba(21, 48, 43, .35); transition: transform .2s;
+}
+.interruptor.activo { background: var(--pino); }
+.interruptor.activo::after { transform: translateX(22px); }
+
+.boton-texto {
+  background: none; border: 1.5px solid var(--tinta-2); border-radius: 9px;
+  padding: 8px 14px; font-size: 14px; font-weight: 600; cursor: pointer; flex-shrink: 0;
+}
+.boton-texto.activa { background: var(--ambar); border-color: var(--ambar); color: #2B1A00; }
+.boton-texto.confirmar { border-color: var(--sirena); color: var(--sirena); }
+
+/* ---- Historial como linea de tiempo ---- */
+h2 { margin: 30px 0 4px; font-size: 20px; font-weight: 800; font-stretch: 90%; letter-spacing: -0.02em; }
+.linea { list-style: none; margin: 0; padding: 0; }
+.hito { display: grid; grid-template-columns: 22px 1fr; column-gap: 10px; }
+.hito .riel { position: relative; }
+.hito .riel::before {
+  content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 2px;
+  margin-left: -1px; background: var(--linea);
+}
+.hito:first-child .riel::before { top: 22px; }
+.hito:last-child .riel::before { bottom: calc(100% - 22px); }
+.hito .marca {
+  position: absolute; left: 50%; top: 17px; width: 12px; height: 12px;
+  margin-left: -6px; border-radius: 50%; background: var(--yeso);
+  border: 2px solid var(--tinta-2);
+}
+.hito.actividad .marca { background: var(--ambar); border-color: var(--ambar); }
+.hito.alarma .marca { background: var(--sirena); border-color: var(--sirena); }
+.hito.cerrada .marca { background: var(--pino); border-color: var(--pino); }
+.hito .texto { padding: 12px 0 12px; border-bottom: 1px solid var(--linea); min-width: 0; }
+.hito:last-child .texto { border-bottom: none; }
+.hito .quien { font-weight: 600; font-size: 16px; }
+.hito .cuando { font-size: 13px; color: var(--tinta-2); font-variant-numeric: tabular-nums; }
+
+.historial-mas { display: flex; width: 100%; justify-content: center; margin-top: 8px; padding: 11px; font: inherit; font-weight: 700; font-size: 14px; color: var(--pino); background: transparent; border: 1.5px solid var(--linea); border-radius: 12px; cursor: pointer; }
+.historial-mas:hover { background: var(--yeso); }
+.historial-mas[hidden] { display: none; }
+
+.vacio, .cargando { color: var(--tinta-2); font-size: 15px; padding: 18px 2px; max-width: 36ch; }
+
+/* ---- Pruebas y pie ---- */
+#zona-pruebas { display: none; margin-top: 22px; }
+#zona-pruebas.visible { display: block; }
+#zona-pruebas .nota { font-size: 12px; color: var(--tinta-2); margin-top: 8px; }
+.pie { margin-top: 30px; font-size: 12px; color: var(--tinta-2); line-height: 1.6; }
+
+

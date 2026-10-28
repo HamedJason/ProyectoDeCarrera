@@ -1,0 +1,19 @@
+{
+  "name": "frontend-web",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Aplicacion web (PWA) de Sentinel Home hecha con Vue 3 y Vite",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "3.5.13"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "5.2.1",
+    "vite": "5.4.11"
+  }
+}

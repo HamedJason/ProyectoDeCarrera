@@ -1,0 +1,185 @@
+/* =========================================================
+   Ilustraciones. Todas tienen una animacion ambiental en reposo
+   y cambian de comportamiento cuando el sensor se activa.
+   ========================================================= */
+
+@keyframes parpadeo { 0%, 86%, 100% { opacity: 1; } 92% { opacity: .15; } }
+@keyframes respirar { 0%, 100% { opacity: .35; transform: scale(.85); } 50% { opacity: 1; transform: scale(1.1); } }
+
+/* ---- Puerta vista de frente ---- */
+.pu { position: relative; width: 84px; height: 108px; margin-top: 8px; perspective: 430px; perspective-origin: 50% 100%; clip-path: inset(-40px -40px 0 -40px); }
+.pu .marco { position: absolute; inset: 0; border: 6px solid #8C9A94; border-bottom: 0; border-radius: 5px 5px 0 0; transition: border-color .4s; }
+.pu .vano {
+  position: absolute; left: 6px; right: 6px; top: 6px; bottom: 0; overflow: hidden;
+  background: linear-gradient(#2A3B35, #1B2926); transition: background .6s;
+}
+.abierta .pu .marco { border-color: var(--ambar); }
+.disparado .pu .marco { border-color: var(--sirena); }
+.pu .giro {
+  position: absolute; left: 6px; right: 6px; top: 6px; bottom: 0;
+  transform-origin: left center; transform-style: preserve-3d;
+  transition: transform 1s cubic-bezier(.34, 1.4, .5, 1);
+}
+.abierta .pu .giro { transform: rotateY(-72deg); }
+.pu .cara {
+  position: absolute; inset: 0; overflow: hidden; border-radius: 2px 2px 0 0;
+  background: linear-gradient(90deg, #1F7060, #17695A 55%, #114B40);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08);
+  transform-origin: left center; animation: puerta-respira 7s ease-in-out infinite;
+}
+.abierta .pu .cara { animation: puerta-balanceo 3.2s ease-in-out infinite; }
+@keyframes puerta-respira { 0%, 100% { transform: rotateY(0); } 50% { transform: rotateY(-1.6deg); } }
+@keyframes puerta-balanceo { 0%, 100% { transform: rotateY(2deg); } 50% { transform: rotateY(-2.5deg); } }
+.pu .cara::before, .pu .cara::after { content: ""; position: absolute; left: 14%; right: 14%; border: 2px solid rgba(255, 255, 255, .16); border-radius: 2px; }
+.pu .cara::before { top: 8%; height: 34%; }
+.pu .cara::after  { bottom: 8%; height: 40%; }
+.pu .brillo {
+  position: absolute; inset: 0;
+  background: linear-gradient(105deg, transparent 38%, rgba(255, 255, 255, .28) 50%, transparent 62%) 160% 0 / 260% 100% no-repeat;
+  animation: brillo 8s ease-in-out infinite;
+}
+@keyframes brillo { 0%, 55% { background-position: 160% 0; } 100% { background-position: -60% 0; } }
+.pu .pomo { position: absolute; right: 9px; top: 54%; width: 8px; height: 8px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #FFE7A3, #C9931F); box-shadow: 0 1px 2px rgba(0, 0, 0, .4); }
+.pu .suelo { position: absolute; left: -16px; right: -16px; bottom: 0; height: 3px; border-radius: 2px; background: #8C9A94; z-index: 3; }
+.pu .noche .luna { right: 9px; top: 12px; width: 13px; height: 13px; }
+.pu .noche .casas { height: 25%; }
+.pu .led { position: absolute; right: -15px; top: 20px; width: 7px; height: 7px; border-radius: 50%; background: #9AA8A2; transition: background .3s; }
+.armado .pu .led { background: var(--pino); box-shadow: 0 0 6px var(--pino); animation: parpadeo 2.6s infinite; }
+.abierta .pu .led, .abierta.armado .pu .led { background: var(--ambar); box-shadow: 0 0 7px var(--ambar); animation: parpadeo .7s infinite; }
+.disparado .pu .led { background: var(--sirena); box-shadow: 0 0 8px var(--sirena); animation: parpadeo .3s infinite; }
+
+/* ---- Ventana vista desde adentro ---- */
+.vn { position: relative; width: 104px; height: 92px; margin-top: 4px; perspective: 520px; }
+.vn .marco { position: absolute; inset: 0; overflow: hidden; border: 5px solid #8C9A94; border-radius: 5px; background: #0E1A2D; transition: border-color .4s; }
+.abierta .vn .marco { border-color: var(--ambar); }
+.disparado .vn .marco { border-color: var(--sirena); }
+.noche .cielo { position: absolute; inset: 0; background: linear-gradient(#0E1A2D, #24446F 90%); }
+.noche .estrellas, .noche .estrellas.b { position: absolute; inset: 0; animation: titilar 3.2s ease-in-out infinite; }
+.noche .estrellas {
+  background:
+    radial-gradient(circle at 18% 22%, #fff 0 1px, transparent 1.6px),
+    radial-gradient(circle at 42% 14%, #fff 0 1px, transparent 1.6px),
+    radial-gradient(circle at 63% 34%, #fff 0 1.2px, transparent 1.8px),
+    radial-gradient(circle at 30% 52%, #fff 0 1px, transparent 1.6px);
+}
+.noche .estrellas.b {
+  animation-delay: 1.5s; animation-duration: 4.1s;
+  background:
+    radial-gradient(circle at 78% 58%, #fff 0 1px, transparent 1.6px),
+    radial-gradient(circle at 52% 66%, #fff 0 1.2px, transparent 1.8px),
+    radial-gradient(circle at 12% 70%, #fff 0 1px, transparent 1.6px),
+    radial-gradient(circle at 88% 12%, #fff 0 1px, transparent 1.6px);
+}
+@keyframes titilar { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+.noche .luna { position: absolute; right: 22px; top: 10px; width: 15px; height: 15px; border-radius: 50%; box-shadow: inset -5px -1px 0 0 #F6EBC0; transform: rotate(-20deg); filter: drop-shadow(0 0 4px rgba(246, 235, 192, .6)); animation: respirar 6s ease-in-out infinite; }
+.vn .cortina {
+  position: absolute; top: -2px; bottom: 6px; width: 22px; --a: 3deg;
+  background: repeating-linear-gradient(90deg, #EBCFA4 0 4px, #D7B07C 4px 8px);
+  border-radius: 0 0 6px 6px; transform-origin: top center; animation: ondea 5s ease-in-out infinite alternate;
+}
+.vn .cortina.i { left: 0; }
+.vn .cortina.d { right: 0; animation-delay: -2s; }
+.abierta .vn .cortina { --a: 9deg; animation-duration: 1.7s; }
+@keyframes ondea { from { transform: skewX(calc(var(--a) * -.4)); } to { transform: skewX(var(--a)); } }
+.vn .hoja { position: absolute; top: 5px; bottom: 5px; width: calc(50% - 5px); transform-style: preserve-3d; transition: transform 1s cubic-bezier(.34, 1.35, .5, 1); }
+.vn .hoja.i { left: 5px;  transform-origin: left center; }
+.vn .hoja.d { right: 5px; transform-origin: right center; }
+.abierta .vn .hoja.i { transform: rotateY(-66deg); }
+.abierta .vn .hoja.d { transform: rotateY(66deg); }
+.vn .hoja .cara {
+  position: absolute; inset: 0; overflow: hidden; border: 3px solid #B4C0BA; border-radius: 2px;
+  background:
+    linear-gradient(#B4C0BA, #B4C0BA) center / 100% 3px no-repeat,
+    linear-gradient(#B4C0BA, #B4C0BA) center / 3px 100% no-repeat,
+    rgba(190, 220, 240, .16);
+  animation: hoja-respira 6s ease-in-out infinite;
+}
+.vn .hoja.i .cara { transform-origin: left center; }
+.vn .hoja.d .cara { transform-origin: right center; animation-delay: -3s; }
+.abierta .vn .hoja.i .cara { animation: hoja-i 3s ease-in-out infinite; }
+.abierta .vn .hoja.d .cara { animation: hoja-d 3.4s ease-in-out infinite; }
+@keyframes hoja-respira { 0%, 100% { transform: rotateY(0); } 50% { transform: rotateY(.9deg); } }
+@keyframes hoja-i { 0%, 100% { transform: rotateY(2deg); } 50% { transform: rotateY(-3deg); } }
+@keyframes hoja-d { 0%, 100% { transform: rotateY(-2deg); } 50% { transform: rotateY(3deg); } }
+.vn .hoja .brillo {
+  position: absolute; inset: 0;
+  background: linear-gradient(115deg, transparent 35%, rgba(255, 255, 255, .34) 50%, transparent 65%) 170% 0 / 280% 100% no-repeat;
+  animation: brillo 9s ease-in-out infinite;
+}
+.vn .hoja.d .brillo { animation-delay: .6s; }
+.noche .casas { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 34%; }
+.noche .casas .v { fill: #F6C766; animation: ventana-luz 5s ease-in-out infinite; }
+.noche .casas .v:nth-of-type(2n) { animation-delay: -1.7s; animation-duration: 7s; }
+.noche .casas .v:nth-of-type(3n) { animation-delay: -3.1s; opacity: .5; }
+@keyframes ventana-luz { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+.vn .repisa { position: absolute; left: -7px; right: -7px; bottom: -6px; height: 6px; border-radius: 2px; background: #8C9A94; }
+.vn .led { position: absolute; right: -14px; top: 8px; width: 7px; height: 7px; border-radius: 50%; background: #9AA8A2; }
+.armado .vn .led { background: var(--pino); box-shadow: 0 0 6px var(--pino); animation: parpadeo 2.6s infinite; }
+.abierta .vn .led, .abierta.armado .vn .led { background: var(--ambar); box-shadow: 0 0 7px var(--ambar); animation: parpadeo .7s infinite; }
+.disparado .vn .led { background: var(--sirena); box-shadow: 0 0 8px var(--sirena); animation: parpadeo .3s infinite; }
+
+/* ---- Sensor de movimiento (PIR) ---- */
+.pr { position: relative; width: 100px; height: 100px; display: grid; place-items: center; }
+.pr .placa { position: absolute; width: 66px; height: 80px; border-radius: 16px; background: linear-gradient(160deg, #F7F9F5, #D4DDD7); box-shadow: 0 2px 0 #B5C1BA, 0 10px 16px rgba(21, 48, 43, .16); }
+.pr .led { position: absolute; left: 50%; top: calc(50% - 32px); width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%; background: #9AA8A2; }
+.armado .pr .led { background: var(--pino); box-shadow: 0 0 5px var(--pino); animation: parpadeo 2.6s infinite; }
+.actividad .pr .led, .actividad.armado .pr .led { background: var(--ambar); box-shadow: 0 0 6px var(--ambar); animation: parpadeo .25s infinite; }
+.disparado .pr .led { background: var(--sirena); box-shadow: 0 0 6px var(--sirena); }
+.pr .domo {
+  position: relative; width: 44px; height: 44px; border-radius: 50%; margin-top: 8px; overflow: hidden;
+  background: repeating-conic-gradient(from 0deg, #F3F5F0 0 15deg, #C6D1CB 15deg 30deg);
+  box-shadow: inset 0 0 0 3px #B5C1BA, 0 1px 3px rgba(21, 48, 43, .3);
+}
+.pr .domo::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(circle at 34% 28%, rgba(255, 255, 255, .85), transparent 46%); animation: destello 5s ease-in-out infinite; }
+@keyframes destello { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+.pr .calor { position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(circle, #FFC94F, #E39B12 70%); mix-blend-mode: multiply; opacity: 0; transition: opacity .3s; }
+.actividad .pr .calor { opacity: .9; }
+.disparado .pr .calor { background: radial-gradient(circle, #FF7B6B, #D22F27 70%); opacity: .95; }
+.pr .onda, .pr .barrido { position: absolute; left: 50%; top: calc(50% + 8px); width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%; opacity: 0; pointer-events: none; }
+.pr .barrido { border: 2px solid var(--tinta-2); animation: barrido 3.8s ease-out infinite; }
+.pr .barrido.b { animation-delay: 1.9s; }
+@keyframes barrido { 0% { opacity: .4; transform: scale(.9); } 100% { opacity: 0; transform: scale(2.1); } }
+.pr .onda { border: 3px solid var(--ambar); }
+.actividad .pr .barrido, .disparado .pr .barrido { display: none; }
+.actividad .pr .onda, .disparado .pr .onda { animation: onda 1.3s ease-out infinite; }
+.disparado .pr .onda { border-color: var(--sirena); }
+.pr .onda.b { animation-delay: .43s !important; }
+.pr .onda.c { animation-delay: .86s !important; }
+@keyframes onda { 0% { opacity: .95; transform: scale(.85); } 100% { opacity: 0; transform: scale(2.3); } }
+.actividad .pr .placa, .disparado .pr .placa { animation: vibra .16s linear infinite; }
+@keyframes vibra { 0%, 100% { transform: translate(0, 0); } 25% { transform: translate(-1px, .5px); } 75% { transform: translate(1px, -.5px); } }
+
+/* ---- Sirena ---- */
+.si { position: relative; width: 100px; height: 100px; }
+.si .haz {
+  position: absolute; left: 50%; top: 36%; width: 240px; height: 240px; margin: -120px 0 0 -120px; border-radius: 50%; opacity: 0; transition: opacity .3s;
+  background: conic-gradient(from 0deg, rgba(232, 60, 45, .7) 0 24deg, transparent 24deg 180deg, rgba(232, 60, 45, .7) 180deg 204deg, transparent 204deg);
+  -webkit-mask: radial-gradient(circle, #000 12%, transparent 62%); mask: radial-gradient(circle, #000 12%, transparent 62%);
+}
+.sonando .si .haz { opacity: 1; animation: gira .9s linear infinite; }
+.prueba .si .haz { opacity: .8; animation: gira 1.2s linear infinite; background: conic-gradient(from 0deg, rgba(227, 155, 18, .7) 0 24deg, transparent 24deg 180deg, rgba(227, 155, 18, .7) 180deg 204deg, transparent 204deg); }
+@keyframes gira { to { transform: rotate(360deg); } }
+.si .cuerpo { position: absolute; inset: 0; }
+.sonando .si .cuerpo, .prueba .si .cuerpo { animation: vibra .12s linear infinite; }
+.si .domo {
+  position: absolute; left: 50%; bottom: 34px; width: 54px; height: 40px; margin-left: -27px; overflow: hidden;
+  border-radius: 27px 27px 4px 4px; background: linear-gradient(#7C3D37, #4E2421); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .08);
+  transition: background .3s, box-shadow .3s;
+}
+.si .domo::after { content: ""; position: absolute; inset: 0; background: radial-gradient(ellipse at 30% 22%, rgba(255, 255, 255, .55), transparent 44%); animation: destello 5s ease-in-out infinite; }
+.sonando .si .domo { background: radial-gradient(circle at 50% 75%, #FF9E8F, #D22F27 62%, #8E1710); animation: pulso-sirena .45s ease-in-out infinite alternate; }
+.prueba .si .domo { background: radial-gradient(circle at 50% 75%, #FFD98A, #E39B12 62%, #8A5A00); animation: pulso-ambar .6s ease-in-out infinite alternate; }
+@keyframes pulso-sirena { from { box-shadow: 0 0 6px 0 rgba(210, 47, 39, .5); } to { box-shadow: 0 0 26px 9px rgba(210, 47, 39, .75); } }
+@keyframes pulso-ambar { from { box-shadow: 0 0 6px 0 rgba(227, 155, 18, .5); } to { box-shadow: 0 0 22px 7px rgba(227, 155, 18, .7); } }
+.si .base { position: absolute; left: 50%; bottom: 14px; width: 72px; height: 21px; margin-left: -36px; border-radius: 5px; background: linear-gradient(#BAC5BF, #97A49E); box-shadow: 0 6px 10px rgba(21, 48, 43, .2); overflow: hidden; }
+.si .base::after { content: ""; position: absolute; left: 8px; right: 8px; top: 8px; bottom: 4px; background: repeating-linear-gradient(90deg, rgba(0, 0, 0, .28) 0 2px, transparent 2px 6px); border-radius: 2px; }
+.si .led { position: absolute; left: 50%; bottom: 31px; width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%; background: #17A88B; box-shadow: 0 0 6px #17A88B; animation: respirar 3s ease-in-out infinite; z-index: 2; }
+.sonando .si .led, .prueba .si .led { display: none; }
+.si .ond { position: absolute; top: 24%; width: 24px; height: 40px; opacity: 0; border: 3px solid rgba(210, 47, 39, .8); --dir: 1; }
+.si .ond.d { right: -4px; border-left: 0; border-radius: 0 50px 50px 0; }
+.si .ond.i { left: -4px; --dir: -1; border-right: 0; border-radius: 50px 0 0 50px; }
+.prueba .si .ond { border-color: rgba(227, 155, 18, .85); }
+.sonando .si .ond, .prueba .si .ond { animation: sale 1s ease-out infinite; }
+.si .ond.b { animation-delay: .5s !important; }
+@keyframes sale { 0% { opacity: .9; transform: translateX(0) scale(.6); } 100% { opacity: 0; transform: translateX(calc(var(--dir) * 20px)) scale(1.35); } }
+

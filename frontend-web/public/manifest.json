@@ -1,0 +1,18 @@
+{
+  "name": "Seguridad residencial",
+  "short_name": "Alarma",
+  "description": "Monitoreo del sistema escalable de seguridad residencial",
+  "start_url": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#E6EBE7",
+  "theme_color": "#E6EBE7",
+  "icons": [
+    {
+      "src": "icono.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

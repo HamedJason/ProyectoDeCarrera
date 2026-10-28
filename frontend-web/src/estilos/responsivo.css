@@ -1,0 +1,14 @@
+/* ---- Pantallas anchas: el titular y los botones van lado a lado ---- */
+@media (min-width: 720px) {
+  .envoltura { padding-top: 24px; }
+  .escena { display: grid; grid-template-columns: minmax(0, 1fr) 280px; column-gap: 28px; align-items: end; padding: 28px 28px 26px; }
+  .escena .controles { margin-top: 0; }
+  .rejilla { grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+  .pr .onda { opacity: .5; transform: scale(1.4); }
+  .pr .barrido { display: none; }
+  .sonando .si .haz, .prueba .si .haz { opacity: .6; }
+}
