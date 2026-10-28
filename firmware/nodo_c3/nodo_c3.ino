@@ -20,6 +20,25 @@
  *
  * Si el concentrador esta apagado, los eventos esperan en una cola pequena.
  *
+ * AHORRO DE BATERIA (USAR_SUENO)
+ *   El nodo pasa casi todo el tiempo en suspension ligera, con la radio apagada
+ *   (~0.2 mA en vez de ~60 mA). Lo despierta:
+ *     - un cambio del contacto magnetico (puerta abierta o cerrada): se envia al
+ *       instante, asi que el contacto siempre queda activo y reporta cada cambio;
+ *     - el movimiento del PIR, pero solo si la casa esta armada;
+ *     - un temporizador (INTERVALO_LATIDO_MS) para el latido y para preguntar si
+ *       la casa sigue armada.
+ *   El concentrador contesta a cada transmision con el estado de armado (tipo
+ *   TIPO_ARMADO). Si el nodo aun no lo sabe, asume "armado" (lo seguro).
+ *   Con la casa desarmada el PIR no despierta al nodo. El cambio de armado llega
+ *   al nodo en el siguiente latido (hasta INTERVALO_LATIDO_MS).
+ *   Para depurar con el Monitor Serie sin dormir, pon USAR_SUENO en false.
+ *
+ *   Para que el contacto gaste menos: con el pull-up interno (~45 kohm) circulan
+ *   ~70 uA por contacto mientras la puerta esta cerrada. Pon una resistencia
+ *   externa de 1 Mohm a 3V3 en cada contacto y cambia PULLUP_EXTERNO a true
+ *   (baja a ~3 uA).
+ *
  * Conexiones (los pines se cambian abajo):
  *   MC-38:  un cable al GPIO 4 (y otro al 3) y el otro a GND, con pull-up interno
  *   AM312:  VCC a 3V3 (o 5V), GND a GND, VOUT al GPIO 5
@@ -31,6 +50,8 @@
 #include <esp_now.h>
 #include <esp_wifi.h>
 #include <esp_idf_version.h>
+#include <esp_sleep.h>
+#include <driver/gpio.h>
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
 #include <esp_mac.h>
 #else
@@ -56,8 +77,20 @@ const ContactoCfg CONTACTOS[] = {
 };
 const int NUM_CONTACTOS = sizeof(CONTACTOS) / sizeof(CONTACTOS[0]);
 const int MAX_CONTACTOS = 6;
+
+// Cada C3 lleva un solo sensor. Deja en true solo el que tenga; el nodo magnetico
+// no necesita saber si la casa esta armada y por eso hace un latido mas espaciado.
+// (Para pruebas se pueden activar los dos.)
+const bool USA_PIR = true;
+const bool USA_CONTACTOS = true;
+const int NUM_ACTIVOS = USA_CONTACTOS ? NUM_CONTACTOS : 0;
+
 const int PIN_PIR = 5;    // salida del AM312, activa en alto
 const int PIN_LED = -1;   // LED de enlace opcional (-1 si no hay)
+
+// Ahorro de energia (ver arriba)
+const bool USAR_SUENO = true;
+const bool PULLUP_EXTERNO = false;   // true si cada contacto lleva 1 Mohm a 3V3
 
 // Cifrado ESP-NOW opcional; debe coincidir con el concentrador. Las claves estan
 // en el repositorio, asi que cambialas por otras de 16 caracteres si lo activas.
@@ -70,7 +103,16 @@ const char* CLAVE_LMK = "lmk-uabc-2026-b2";
 const unsigned long DEBOUNCE_MS = 50;
 const unsigned long BLOQUEO_PIR_MS = 8000;
 const unsigned long PIR_ESTABILIZACION_MS = 45000;   // el AM312 tarda 30-60 s en estabilizarse
-const unsigned long INTERVALO_LATIDO_MS = 30000;     // reporta el contacto aunque no cambie
+// Latido: demuestra que el nodo sigue vivo y corrige eventos perdidos. El nodo PIR
+// ademas pregunta con el si la casa esta armada, por eso va mas seguido. El
+// backend da un nodo por perdido a los 120 s, asi que no pasar de 60 s.
+const unsigned long INTERVALO_LATIDO_MS = USA_PIR ? 20000UL : 60000UL;
+// Potencia de transmision en cuartos de dBm (44 = 11 dBm). 0 = la del core
+// (20 dBm). Bajarla ahorra bateria si el concentrador esta cerca; probar el alcance.
+const int POTENCIA_TX_CUARTOS_DBM = 0;
+const unsigned long VENTANA_CONSOLA_MS = 15000;      // tras arrancar no duerme, para usar el Monitor Serie
+const unsigned long ESPERA_ARMADO_MS = 30;           // escucha la respuesta del concentrador
+const unsigned long BUSQUEDA_MAX_MS = 60000;         // espera maxima entre busquedas si no hay concentrador
 const unsigned long ESPERA_CONFIRMACION_MS = 80;
 const unsigned long ESPERA_RESPUESTA_MS = 100;       // por canal, al pedir emparejarse
 const int  REINTENTOS_ENVIO = 3;
@@ -85,6 +127,7 @@ const uint8_t TIPO_ESTADO    = 2;
 const uint8_t TIPO_HOLA      = 3;
 const uint8_t TIPO_EMPAREJAR = 4;
 const uint8_t TIPO_RESPUESTA = 5;
+const uint8_t TIPO_ARMADO    = 6;   // el concentrador dice si la casa esta armada (valor 1/0)
 
 struct __attribute__((packed)) PaqueteSensor {
   uint8_t  magia[2];      // 'S', 'R'
@@ -127,6 +170,15 @@ unsigned long tUltimoLatido = 0;
 bool registroPirEnviado = false;
 int  rondasEmparejar = 0;
 
+// Ahorro de energia
+bool armado = true;                 // hasta que el concentrador diga lo contrario, se vigila
+volatile bool armadoRecibido = false;
+volatile int8_t armadoValor = 1;
+bool radioActiva = false;
+int  canalHub = 0;                  // canal en el que se encontro al concentrador
+unsigned long intervaloBusqueda = INTERVALO_BUSQUEDA_MS;
+bool hubo_envio = false;            // hubo envios en este ciclo y falta oir la respuesta
+
 uint32_t secuencia = 0;
 
 // Resultado del ultimo envio, que llega en la funcion de confirmacion
@@ -163,7 +215,7 @@ void armarIdentificadores() {
   else snprintf(NODO_ID, sizeof(NODO_ID), "c3-%s", corto);
   if (ID_PIR_ANTIGUO[0]) snprintf(ID_PIR, sizeof(ID_PIR), "%s", ID_PIR_ANTIGUO);
   else snprintf(ID_PIR, sizeof(ID_PIR), "%s-pir", NODO_ID);
-  for (int i = 0; i < NUM_CONTACTOS && i < MAX_CONTACTOS; i++) {
+  for (int i = 0; i < NUM_ACTIVOS && i < MAX_CONTACTOS; i++) {
     if (CONTACTOS[i].idAntiguo[0]) snprintf(contactoId[i], sizeof(contactoId[i]), "%s", CONTACTOS[i].idAntiguo);
     else snprintf(contactoId[i], sizeof(contactoId[i]), "%s-gpio%d", NODO_ID, CONTACTOS[i].pin);
   }
@@ -183,9 +235,20 @@ void alEnviar(const uint8_t*, esp_now_send_status_t estado) {
 
 // Solo interesa la respuesta de emparejamiento dirigida a esta placa
 void procesarRecepcion(const uint8_t* mac, const uint8_t* datos, int largo) {
-  if (hubGuardado || largo != (int)sizeof(PaqueteSensor)) return;
+  if (largo != (int)sizeof(PaqueteSensor)) return;
   const PaqueteSensor* p = (const PaqueteSensor*)datos;
   if (p->magia[0] != 'S' || p->magia[1] != 'R' || p->version != 1) return;
+
+  // Estado de armado: solo del concentrador al que se esta enlazado
+  if (p->tipo == TIPO_ARMADO) {
+    if (hubGuardado && memcmp(mac, hubMac, 6) == 0 && strncmp(p->variable, macPropia, 12) == 0) {
+      armadoValor = p->valor;
+      armadoRecibido = true;
+    }
+    return;
+  }
+
+  if (hubGuardado) return;
   if (p->tipo != TIPO_RESPUESTA) return;
   if (strncmp(p->variable, macPropia, 12) != 0) return;
   memcpy(macRespuesta, mac, 6);
@@ -215,8 +278,10 @@ bool registrarHub() {
 }
 
 bool iniciarEspNow() {
+  WiFi.persistent(false);   // no escribir la configuracion de Wi-Fi en flash en cada despertar
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
+  if (POTENCIA_TX_CUARTOS_DBM > 0) esp_wifi_set_max_tx_power(POTENCIA_TX_CUARTOS_DBM);
 
   if (esp_now_init() != ESP_OK) {
     Serial.println("[ESP-NOW] No se pudo iniciar.");
@@ -279,6 +344,7 @@ bool buscarCanal() {
       if (enviarUnaVez(hola)) {
         Serial.print("[Enlace] Concentrador encontrado en el canal ");
         Serial.println(c);
+        canalHub = c;
         return true;
       }
     }
@@ -302,9 +368,67 @@ bool buscarEmparejamiento() {
     esp_now_send(MAC_BROADCAST, (const uint8_t*)&req, sizeof(req));
     unsigned long t0 = millis();
     while (!respuestaRecibida && millis() - t0 < ESPERA_RESPUESTA_MS) delay(1);
-    if (respuestaRecibida) return true;
+    if (respuestaRecibida) { canalHub = c; return true; }
   }
   return false;
+}
+
+// ===================== Radio y suspension =====================
+
+bool radioEncender() {
+  if (radioActiva) return true;
+  if (!iniciarEspNow()) return false;
+  if (canalHub > 0) esp_wifi_set_channel(canalHub, WIFI_SECOND_CHAN_NONE);
+  radioActiva = true;
+  return true;
+}
+
+void radioApagar() {
+  if (!radioActiva) return;
+  esp_now_deinit();
+  WiFi.mode(WIFI_OFF);
+  radioActiva = false;
+}
+
+void aplicarArmado() {
+  if (!armadoRecibido) return;
+  armadoRecibido = false;
+  bool nuevo = (armadoValor != 0);
+  if (nuevo != armado) {
+    armado = nuevo;
+    Serial.print("[Armado] La casa esta ");
+    Serial.println(armado ? "ARMADA: se vigila el movimiento." : "DESARMADA: se ignora el movimiento.");
+  }
+}
+
+// Tras transmitir, el concentrador contesta en pocos milisegundos
+void esperarArmado() {
+  if (!hubo_envio) return;
+  hubo_envio = false;
+  if (!USA_PIR) return;   // solo el PIR necesita saber si la casa esta armada
+  unsigned long t0 = millis();
+  while (!armadoRecibido && millis() - t0 < ESPERA_ARMADO_MS) delay(1);
+  aplicarArmado();
+}
+
+// Suspension ligera con la radio ya apagada. Despierta por:
+//  - un cambio en cualquier contacto (se espera el nivel contrario al actual,
+//    asi que sea cual sea el cambio, abrir o cerrar, el nodo despierta);
+//  - el PIR en alto, solo si vigilarPir;
+//  - el temporizador.
+void dormir(unsigned long ms, bool vigilarPir) {
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+  for (int i = 0; i < NUM_ACTIVOS && i < MAX_CONTACTOS; i++) {
+    gpio_wakeup_enable((gpio_num_t)CONTACTOS[i].pin,
+                       contactoEstable[i] == HIGH ? GPIO_INTR_LOW_LEVEL : GPIO_INTR_HIGH_LEVEL);
+  }
+  if (vigilarPir) gpio_wakeup_enable((gpio_num_t)PIN_PIR, GPIO_INTR_HIGH_LEVEL);
+  esp_sleep_enable_gpio_wakeup();
+  esp_sleep_enable_timer_wakeup(ms * 1000ULL);
+  if (Serial) Serial.flush();   // sin PC conectada, el USB no tiene a quien enviar
+  esp_light_sleep_start();
+  for (int i = 0; i < NUM_ACTIVOS && i < MAX_CONTACTOS; i++) gpio_wakeup_disable((gpio_num_t)CONTACTOS[i].pin);
+  gpio_wakeup_disable((gpio_num_t)PIN_PIR);
 }
 
 void guardarHub() {
@@ -343,6 +467,9 @@ void vaciarCola() {
     }
 
     fallosSeguidos = 0;
+    hubo_envio = true;
+    // Cualquier paquete demuestra que el nodo esta vivo: se pospone el latido
+    tUltimoLatido = millis() ? millis() : 1;
     Serial.print("[Envio] ");
     Serial.print(cola[0].tipo == TIPO_EVENTO ? "evento " : "estado ");
     Serial.print(cola[0].sensorId);
@@ -413,18 +540,20 @@ void indicarLed(bool encendido) {
 // ===================== setup / loop =====================
 
 void setup() {
+  // 80 MHz basta para ESP-NOW y gasta menos que los 160 MHz por defecto
+  if (USAR_SUENO) setCpuFrequencyMhz(80);
   Serial.begin(115200);
   delay(300);
 
-  for (int i = 0; i < NUM_CONTACTOS && i < MAX_CONTACTOS; i++) {
-    pinMode(CONTACTOS[i].pin, INPUT_PULLUP);
+  for (int i = 0; i < NUM_ACTIVOS && i < MAX_CONTACTOS; i++) {
+    pinMode(CONTACTOS[i].pin, PULLUP_EXTERNO ? INPUT : INPUT_PULLUP);
   }
   // Entrada simple para el AM312: su salida es debil y un pull-down interno
   // la dejaria en un nivel intermedio
-  pinMode(PIN_PIR, INPUT);
+  pinMode(PIN_PIR, USA_PIR ? INPUT : INPUT_PULLDOWN);   // sin PIR, evita una entrada flotante
   if (PIN_LED >= 0) pinMode(PIN_LED, OUTPUT);
 
-  for (int i = 0; i < NUM_CONTACTOS && i < MAX_CONTACTOS; i++) {
+  for (int i = 0; i < NUM_ACTIVOS && i < MAX_CONTACTOS; i++) {
     contactoEstable[i] = digitalRead(CONTACTOS[i].pin);
     contactoPrevio[i] = contactoEstable[i];
     tCambioContacto[i] = 0;
@@ -443,7 +572,7 @@ void setup() {
   Serial.println("==========================================");
   Serial.println(" Nodo periferico ESP32-C3");
   Serial.print(" Nodo: "); Serial.println(NODO_ID);
-  for (int i = 0; i < NUM_CONTACTOS && i < MAX_CONTACTOS; i++) {
+  for (int i = 0; i < NUM_ACTIVOS && i < MAX_CONTACTOS; i++) {
     Serial.print(" Contacto "); Serial.print(contactoId[i]);
     Serial.print(": GPIO "); Serial.println(CONTACTOS[i].pin);
   }
@@ -455,6 +584,7 @@ void setup() {
     delay(5000);
     ESP.restart();
   }
+  radioActiva = true;
   Serial.print("[MAC] Esta placa: ");
   uint8_t mac[6];
   esp_read_mac(mac, ESP_MAC_WIFI_STA);
@@ -472,7 +602,7 @@ void loop() {
   atenderConsola();
 
   // Contactos magneticos con filtrado de rebote
-  for (int i = 0; i < NUM_CONTACTOS && i < MAX_CONTACTOS; i++) {
+  for (int i = 0; i < NUM_ACTIVOS && i < MAX_CONTACTOS; i++) {
     int lectura = digitalRead(CONTACTOS[i].pin);
     if (lectura != contactoPrevio[i]) {
       tCambioContacto[i] = ahora;
@@ -491,12 +621,15 @@ void loop() {
   }
 
   // Sensor de movimiento
-  if (!pirListo) {
+  if (!USA_PIR) {
+    // este nodo no lleva PIR
+  } else if (!pirListo) {
     if (ahora >= PIR_ESTABILIZACION_MS) {
       pirListo = true;
       pirPulso = false;
       pirPrevio = digitalRead(PIN_PIR);
-      attachInterrupt(digitalPinToInterrupt(PIN_PIR), alDetectarPir, RISING);
+      // Con suspension no se usa interrupcion: el despertar por nivel hace su trabajo
+      if (!USAR_SUENO) attachInterrupt(digitalPinToInterrupt(PIN_PIR), alDetectarPir, RISING);
       Serial.print("[PIR] Listo en GPIO ");
       Serial.print(PIN_PIR);
       Serial.print(". Lectura inicial: ");
@@ -511,7 +644,9 @@ void loop() {
     if (pirPulso) {
       pirPulso = false;
       Serial.println("[PIR] Pulso detectado");
-      if (tUltimoPir == 0 || ahora - tUltimoPir > BLOQUEO_PIR_MS) {
+      if (!armado) {
+        Serial.println("   Ignorado: la casa esta desarmada.");
+      } else if (tUltimoPir == 0 || ahora - tUltimoPir > BLOQUEO_PIR_MS) {
         tUltimoPir = ahora;
         PaqueteSensor p;
         llenarPaquete(p, TIPO_EVENTO, ID_PIR, "movimiento", ZONA, 1);
@@ -522,8 +657,16 @@ void loop() {
     }
   }
 
+  // Con suspension, la radio solo se enciende cuando hay algo que transmitir
+  bool tocaLatido = hubGuardado && enlazado && (tUltimoLatido == 0 || ahora - tUltimoLatido >= INTERVALO_LATIDO_MS);
+  bool tocaBuscar = !enlazado && ahora - tUltimaBusqueda >= (hubGuardado ? intervaloBusqueda : INTERVALO_BUSQUEDA_MS);
+  if (USAR_SUENO && hubGuardado && !radioActiva && (colaTam > 0 || tocaLatido || tocaBuscar)) {
+    if (!radioEncender()) delay(1000);
+  }
+  aplicarArmado();
+
   // Enlace con el concentrador
-  if (!enlazado && ahora - tUltimaBusqueda > INTERVALO_BUSQUEDA_MS) {
+  if (radioActiva && tocaBuscar) {
     tUltimaBusqueda = ahora;
     if (!hubGuardado) {
       if (buscarEmparejamiento()) {
@@ -532,16 +675,19 @@ void loop() {
       }
     } else {
       enlazado = buscarCanal();
+      // Sin concentrador, cada intento espera mas para no gastar la bateria
+      if (enlazado) intervaloBusqueda = INTERVALO_BUSQUEDA_MS;
+      else intervaloBusqueda = min(intervaloBusqueda * 2, BUSQUEDA_MAX_MS);
     }
     fallosSeguidos = 0;
     if (enlazado) tUltimoLatido = 0;   // reporta el estado enseguida
   }
 
   // Estado periodico: registra los sensores y corrige eventos perdidos
-  if (enlazado && (tUltimoLatido == 0 || ahora - tUltimoLatido > INTERVALO_LATIDO_MS)) {
+  if (radioActiva && enlazado && (tUltimoLatido == 0 || ahora - tUltimoLatido >= INTERVALO_LATIDO_MS)) {
     tUltimoLatido = ahora ? ahora : 1;
     PaqueteSensor p;
-    for (int i = 0; i < NUM_CONTACTOS && i < MAX_CONTACTOS; i++) {
+    for (int i = 0; i < NUM_ACTIVOS && i < MAX_CONTACTOS; i++) {
       llenarPaquete(p, TIPO_ESTADO, contactoId[i], "estado_puerta", ZONA,
                     contactoEstable[i] == HIGH ? 1 : 0);
       encolar(p);
@@ -553,7 +699,48 @@ void loop() {
     }
   }
 
-  vaciarCola();
-  indicarLed(enlazado);
-  delay(5);
+  if (radioActiva) vaciarCola();
+  esperarArmado();
+
+  // ---- Suspension ----
+  if (!USAR_SUENO || !hubGuardado || ahora < VENTANA_CONSOLA_MS) {
+    indicarLed(enlazado);
+    delay(5);
+    return;
+  }
+
+  // No dormir mientras haya algo por resolver
+  bool pendiente = colaTam > 0 || Serial.available();
+  for (int i = 0; i < NUM_ACTIVOS && i < MAX_CONTACTOS; i++) {
+    if (digitalRead(CONTACTOS[i].pin) != contactoEstable[i]) pendiente = true;   // rebote en curso
+  }
+  if (pendiente) { delay(5); return; }
+
+  // Cuanto dormir como maximo: hasta el siguiente latido o intento de busqueda
+  ahora = millis();
+  unsigned long limite;
+  if (enlazado) {
+    unsigned long t = ahora - tUltimoLatido;
+    limite = t >= INTERVALO_LATIDO_MS ? 100 : INTERVALO_LATIDO_MS - t;
+  } else {
+    unsigned long t = ahora - tUltimaBusqueda;
+    limite = t >= intervaloBusqueda ? 100 : intervaloBusqueda - t;
+  }
+  if (USA_PIR && !pirListo) {
+    unsigned long resto = ahora >= PIR_ESTABILIZACION_MS ? 100 : PIR_ESTABILIZACION_MS - ahora;
+    if (resto < limite) limite = resto;
+  }
+
+  // El PIR solo despierta al nodo si la casa esta armada y el sensor esta en
+  // reposo (en alto no se puede esperar un nivel alto; se revisa cada 300 ms).
+  bool vigilarPir = false;
+  if (USA_PIR && pirListo && armado) {
+    bool libre = digitalRead(PIN_PIR) == LOW && (tUltimoPir == 0 || ahora - tUltimoPir > BLOQUEO_PIR_MS);
+    if (libre) vigilarPir = true;
+    else if (limite > 300) limite = 300;
+  }
+
+  radioApagar();
+  indicarLed(false);
+  dormir(limite, vigilarPir);
 }

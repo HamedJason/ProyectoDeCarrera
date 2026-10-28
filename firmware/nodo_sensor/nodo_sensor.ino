@@ -101,6 +101,7 @@ const uint8_t TIPO_ESTADO    = 2;
 const uint8_t TIPO_HOLA      = 3;   // prueba de canal
 const uint8_t TIPO_EMPAREJAR = 4;   // el C3 pide enlazarse (broadcast)
 const uint8_t TIPO_RESPUESTA = 5;   // el concentrador acepta (broadcast con la MAC del C3)
+const uint8_t TIPO_ARMADO    = 6;   // el concentrador informa si la casa esta armada (valor 1/0)
 
 struct __attribute__((packed)) PaqueteSensor {
   uint8_t  magia[2];
@@ -215,6 +216,7 @@ unsigned long enviosFallidos = 0;
 
 // Estado que viene del backend
 bool sistemaArmado   = false;
+bool armadoConocido  = false;   // ya se consulto el backend al menos una vez
 bool modoSilencioso  = false;
 bool salidaManual    = false;   // activacion directa desde la app
 
@@ -580,6 +582,7 @@ void consultarEstado() {
     if (!deserializeJson(doc, http.getString())) {
       bool armadoAntes = sistemaArmado;
       sistemaArmado  = doc["armado"]          | false;
+      armadoConocido = true;
       modoSilencioso = doc["modo_silencioso"] | false;
       salidaManual   = doc["actuador_activo"] | false;
       bool alarmaRemota = doc["alarma_activa"] | false;
@@ -659,18 +662,38 @@ void responderEmparejamiento(const uint8_t* mac, const PaqueteSensor* peticion) 
   esp_now_send(MAC_BROADCAST, (const uint8_t*)&r, sizeof(r));
 }
 
+// Los C3 duermen casi todo el tiempo y solo escuchan un instante despues de
+// transmitir. Por eso la respuesta con el estado de armado sale de inmediato,
+// desde la propia funcion de recepcion, y por broadcast (no exige registrar
+// cada C3 como par). El C3 la reconoce por la MAC que va en "variable".
+void responderArmado(const uint8_t* mac) {
+  if (!armadoConocido) return;   // el C3 conserva su ultimo valor (por defecto, armado)
+  PaqueteSensor r;
+  memset(&r, 0, sizeof(r));
+  r.magia[0] = 'S';
+  r.magia[1] = 'R';
+  r.version = 1;
+  r.tipo = TIPO_ARMADO;
+  strncpy(r.nodoId, NODO_ID, sizeof(r.nodoId) - 1);
+  snprintf(r.variable, sizeof(r.variable), "%02X%02X%02X%02X%02X%02X",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  r.valor = sistemaArmado ? 1 : 0;
+  esp_now_send(MAC_BROADCAST, (const uint8_t*)&r, sizeof(r));
+}
+
 void guardarPaqueteRx(const uint8_t* mac, const uint8_t* datos, int largo, int rssi) {
   if (largo != (int)sizeof(PaqueteSensor)) return;
   const PaqueteSensor* p = (const PaqueteSensor*)datos;
   if (p->magia[0] != 'S' || p->magia[1] != 'R' || p->version != 1) return;
 
   if (p->tipo == TIPO_EMPAREJAR) { responderEmparejamiento(mac, p); return; }
-  if (p->tipo == TIPO_RESPUESTA) return;
+  if (p->tipo == TIPO_RESPUESTA || p->tipo == TIPO_ARMADO) return;
   if (!macPermitida(mac)) {
     memcpy(macDesconocida, mac, 6);
     hayDesconocido = true;
     return;
   }
+  if (p->tipo == TIPO_EVENTO || p->tipo == TIPO_ESTADO || p->tipo == TIPO_HOLA) responderArmado(mac);
 
   int sig = (rxEscribir + 1) % CAP_COLA_RX;
   if (sig == rxLeer) return;   // cola llena: el nodo reintentara
