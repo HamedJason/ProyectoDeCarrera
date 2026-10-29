@@ -6,6 +6,12 @@
   .rejilla { grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); }
 }
 
+/* Reducir animaciones desde el panel lateral: mismo efecto que la preferencia del sistema */
+:root[data-movimiento="reducido"] *, :root[data-movimiento="reducido"] *::before, :root[data-movimiento="reducido"] *::after { animation: none !important; transition: none !important; }
+:root[data-movimiento="reducido"] .pr .onda { opacity: .5; transform: scale(1.4); }
+:root[data-movimiento="reducido"] .pr .barrido { display: none; }
+:root[data-movimiento="reducido"] .sonando .si .haz, :root[data-movimiento="reducido"] .prueba .si .haz { opacity: .6; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
   .pr .onda { opacity: .5; transform: scale(1.4); }

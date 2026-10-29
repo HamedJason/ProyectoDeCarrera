@@ -8,7 +8,7 @@
 
 /* ---- Puerta vista de frente ---- */
 .pu { position: relative; width: 84px; height: 108px; margin-top: 8px; perspective: 430px; perspective-origin: 50% 100%; clip-path: inset(-40px -40px 0 -40px); }
-.pu .marco { position: absolute; inset: 0; border: 6px solid #8C9A94; border-bottom: 0; border-radius: 5px 5px 0 0; transition: border-color .4s; }
+.pu .marco { position: absolute; inset: 0; border: 6px solid var(--obj-marco); border-bottom: 0; border-radius: 5px 5px 0 0; transition: border-color .4s; }
 .pu .vano {
   position: absolute; left: 6px; right: 6px; top: 6px; bottom: 0; overflow: hidden;
   background: linear-gradient(#2A3B35, #1B2926); transition: background .6s;
@@ -40,17 +40,17 @@
 }
 @keyframes brillo { 0%, 55% { background-position: 160% 0; } 100% { background-position: -60% 0; } }
 .pu .pomo { position: absolute; right: 9px; top: 54%; width: 8px; height: 8px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #FFE7A3, #C9931F); box-shadow: 0 1px 2px rgba(0, 0, 0, .4); }
-.pu .suelo { position: absolute; left: -16px; right: -16px; bottom: 0; height: 3px; border-radius: 2px; background: #8C9A94; z-index: 3; }
+.pu .suelo { position: absolute; left: -16px; right: -16px; bottom: 0; height: 3px; border-radius: 2px; background: var(--obj-marco); z-index: 3; }
 .pu .noche .luna { right: 9px; top: 12px; width: 13px; height: 13px; }
 .pu .noche .casas { height: 25%; }
-.pu .led { position: absolute; right: -15px; top: 20px; width: 7px; height: 7px; border-radius: 50%; background: #9AA8A2; transition: background .3s; }
+.pu .led { position: absolute; right: -15px; top: 20px; width: 7px; height: 7px; border-radius: 50%; background: var(--obj-led-off); transition: background .3s; }
 .armado .pu .led { background: var(--pino); box-shadow: 0 0 6px var(--pino); animation: parpadeo 2.6s infinite; }
 .abierta .pu .led, .abierta.armado .pu .led { background: var(--ambar); box-shadow: 0 0 7px var(--ambar); animation: parpadeo .7s infinite; }
 .disparado .pu .led { background: var(--sirena); box-shadow: 0 0 8px var(--sirena); animation: parpadeo .3s infinite; }
 
 /* ---- Ventana vista desde adentro ---- */
 .vn { position: relative; width: 104px; height: 92px; margin-top: 4px; perspective: 520px; }
-.vn .marco { position: absolute; inset: 0; overflow: hidden; border: 5px solid #8C9A94; border-radius: 5px; background: #0E1A2D; transition: border-color .4s; }
+.vn .marco { position: absolute; inset: 0; overflow: hidden; border: 5px solid var(--obj-marco); border-radius: 5px; background: #0E1A2D; transition: border-color .4s; }
 .abierta .vn .marco { border-color: var(--ambar); }
 .disparado .vn .marco { border-color: var(--sirena); }
 .noche .cielo { position: absolute; inset: 0; background: linear-gradient(#0E1A2D, #24446F 90%); }
@@ -87,10 +87,10 @@
 .abierta .vn .hoja.i { transform: rotateY(-66deg); }
 .abierta .vn .hoja.d { transform: rotateY(66deg); }
 .vn .hoja .cara {
-  position: absolute; inset: 0; overflow: hidden; border: 3px solid #B4C0BA; border-radius: 2px;
+  position: absolute; inset: 0; overflow: hidden; border: 3px solid var(--obj-vidrio); border-radius: 2px;
   background:
-    linear-gradient(#B4C0BA, #B4C0BA) center / 100% 3px no-repeat,
-    linear-gradient(#B4C0BA, #B4C0BA) center / 3px 100% no-repeat,
+    linear-gradient(var(--obj-vidrio), var(--obj-vidrio)) center / 100% 3px no-repeat,
+    linear-gradient(var(--obj-vidrio), var(--obj-vidrio)) center / 3px 100% no-repeat,
     rgba(190, 220, 240, .16);
   animation: hoja-respira 6s ease-in-out infinite;
 }
@@ -112,23 +112,23 @@
 .noche .casas .v:nth-of-type(2n) { animation-delay: -1.7s; animation-duration: 7s; }
 .noche .casas .v:nth-of-type(3n) { animation-delay: -3.1s; opacity: .5; }
 @keyframes ventana-luz { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
-.vn .repisa { position: absolute; left: -7px; right: -7px; bottom: -6px; height: 6px; border-radius: 2px; background: #8C9A94; }
-.vn .led { position: absolute; right: -14px; top: 8px; width: 7px; height: 7px; border-radius: 50%; background: #9AA8A2; }
+.vn .repisa { position: absolute; left: -7px; right: -7px; bottom: -6px; height: 6px; border-radius: 2px; background: var(--obj-marco); }
+.vn .led { position: absolute; right: -14px; top: 8px; width: 7px; height: 7px; border-radius: 50%; background: var(--obj-led-off); }
 .armado .vn .led { background: var(--pino); box-shadow: 0 0 6px var(--pino); animation: parpadeo 2.6s infinite; }
 .abierta .vn .led, .abierta.armado .vn .led { background: var(--ambar); box-shadow: 0 0 7px var(--ambar); animation: parpadeo .7s infinite; }
 .disparado .vn .led { background: var(--sirena); box-shadow: 0 0 8px var(--sirena); animation: parpadeo .3s infinite; }
 
 /* ---- Sensor de movimiento (PIR) ---- */
 .pr { position: relative; width: 100px; height: 100px; display: grid; place-items: center; }
-.pr .placa { position: absolute; width: 66px; height: 80px; border-radius: 16px; background: linear-gradient(160deg, #F7F9F5, #D4DDD7); box-shadow: 0 2px 0 #B5C1BA, 0 10px 16px rgba(21, 48, 43, .16); }
-.pr .led { position: absolute; left: 50%; top: calc(50% - 32px); width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%; background: #9AA8A2; }
+.pr .placa { position: absolute; width: 66px; height: 80px; border-radius: 16px; background: var(--obj-placa); box-shadow: 0 2px 0 var(--obj-sombra), 0 10px 16px rgba(21, 48, 43, .16); }
+.pr .led { position: absolute; left: 50%; top: calc(50% - 32px); width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%; background: var(--obj-led-off); }
 .armado .pr .led { background: var(--pino); box-shadow: 0 0 5px var(--pino); animation: parpadeo 2.6s infinite; }
 .actividad .pr .led, .actividad.armado .pr .led { background: var(--ambar); box-shadow: 0 0 6px var(--ambar); animation: parpadeo .25s infinite; }
 .disparado .pr .led { background: var(--sirena); box-shadow: 0 0 6px var(--sirena); }
 .pr .domo {
   position: relative; width: 44px; height: 44px; border-radius: 50%; margin-top: 8px; overflow: hidden;
-  background: repeating-conic-gradient(from 0deg, #F3F5F0 0 15deg, #C6D1CB 15deg 30deg);
-  box-shadow: inset 0 0 0 3px #B5C1BA, 0 1px 3px rgba(21, 48, 43, .3);
+  background: repeating-conic-gradient(from 0deg, var(--obj-domo-a) 0 15deg, var(--obj-domo-b) 15deg 30deg);
+  box-shadow: inset 0 0 0 3px var(--obj-sombra), 0 1px 3px rgba(21, 48, 43, .3);
 }
 .pr .domo::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(circle at 34% 28%, rgba(255, 255, 255, .85), transparent 46%); animation: destello 5s ease-in-out infinite; }
 @keyframes destello { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
@@ -171,7 +171,7 @@
 .prueba .si .domo { background: radial-gradient(circle at 50% 75%, #FFD98A, #E39B12 62%, #8A5A00); animation: pulso-ambar .6s ease-in-out infinite alternate; }
 @keyframes pulso-sirena { from { box-shadow: 0 0 6px 0 rgba(210, 47, 39, .5); } to { box-shadow: 0 0 26px 9px rgba(210, 47, 39, .75); } }
 @keyframes pulso-ambar { from { box-shadow: 0 0 6px 0 rgba(227, 155, 18, .5); } to { box-shadow: 0 0 22px 7px rgba(227, 155, 18, .7); } }
-.si .base { position: absolute; left: 50%; bottom: 14px; width: 72px; height: 21px; margin-left: -36px; border-radius: 5px; background: linear-gradient(#BAC5BF, #97A49E); box-shadow: 0 6px 10px rgba(21, 48, 43, .2); overflow: hidden; }
+.si .base { position: absolute; left: 50%; bottom: 14px; width: 72px; height: 21px; margin-left: -36px; border-radius: 5px; background: var(--obj-base); box-shadow: 0 6px 10px rgba(21, 48, 43, .2); overflow: hidden; }
 .si .base::after { content: ""; position: absolute; left: 8px; right: 8px; top: 8px; bottom: 4px; background: repeating-linear-gradient(90deg, rgba(0, 0, 0, .28) 0 2px, transparent 2px 6px); border-radius: 2px; }
 .si .led { position: absolute; left: 50%; bottom: 31px; width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%; background: #17A88B; box-shadow: 0 0 6px #17A88B; animation: respirar 3s ease-in-out infinite; z-index: 2; }
 .sonando .si .led, .prueba .si .led { display: none; }

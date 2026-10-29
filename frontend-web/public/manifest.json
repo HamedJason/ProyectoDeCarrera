@@ -1,7 +1,7 @@
 {
-  "name": "Seguridad residencial",
-  "short_name": "Alarma",
-  "description": "Monitoreo del sistema escalable de seguridad residencial",
+  "name": "Sentinel Home",
+  "short_name": "Sentinel",
+  "description": "Sentinel Home: monitoreo de la seguridad residencial de tu casa",
   "start_url": ".",
   "display": "standalone",
   "orientation": "portrait",

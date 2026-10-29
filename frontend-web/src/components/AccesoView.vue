@@ -37,7 +37,7 @@ async function enviarCrear() {
 <template>
   <main id="acceso" :class="{ visible: pantalla === 'acceso' }" aria-label="Acceso">
     <div class="acceso-caja">
-      <h1 class="titular">Seguridad residencial</h1>
+      <h1 class="titular">Sentinel Home</h1>
       <p class="subtitular">{{ acceso.subtitulo }}</p>
 
       <div v-show="!acceso.ocultarPestanas" class="pestanas" role="tablist">

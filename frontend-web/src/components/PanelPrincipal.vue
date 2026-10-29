@@ -16,7 +16,9 @@ import DialogoCasas from './DialogoCasas.vue';
 import DialogoGestion from './DialogoGestion.vue';
 import DialogoFoto from './DialogoFoto.vue';
 import DialogoVivo from './DialogoVivo.vue';
-import { sensores, cargado } from '../stores/casa.js';
+import PanelLateral from './PanelLateral.vue';
+import HazAlarma from './HazAlarma.vue';
+import { sensores, cargado, estado } from '../stores/casa.js';
 import { vivienda } from '../stores/sesion.js';
 import { abrirSensor } from '../stores/ui.js';
 
@@ -26,6 +28,7 @@ const movimiento = computed(() => sensores.value.filter((s) => s.tipo === 'movim
 
 <template>
   <div id="app" class="envoltura">
+    <Transition name="haz"><HazAlarma v-if="vivienda && estado.alarma_activa" /></Transition>
     <BarraSuperior />
     <AvisoConexion />
     <BandasAviso />
@@ -51,12 +54,11 @@ const movimiento = computed(() => sensores.value.filter((s) => s.tipo === 'movim
       <ZonaPruebas />
     </div>
 
-    <div class="pie">Proyecto de Carrera, UABC FCQI</div>
-
     <DialogoSensor />
     <DialogoCasas />
     <DialogoGestion />
     <DialogoFoto />
     <DialogoVivo />
+    <PanelLateral />
   </div>
 </template>

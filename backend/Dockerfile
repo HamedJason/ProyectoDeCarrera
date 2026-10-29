@@ -3,6 +3,9 @@
 
 FROM node:20-alpine
 
+# Sin esto Express muestra la pila de errores en las respuestas y corre mas lento
+ENV NODE_ENV=production
+
 WORKDIR /app
 
 # ffmpeg lo usa el agente de la camara (camara_rtsp.js) para sacar fotos y cuadros

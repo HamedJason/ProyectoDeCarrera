@@ -33,7 +33,7 @@ const subtitular = computed(() => {
 <template>
   <section class="escena" :class="clase" aria-label="Estado de la casa">
     <div class="texto-escena">
-      <h1 class="titular" aria-live="polite">{{ titular }}</h1>
+      <h1 class="titular" aria-live="polite"><Transition name="titular" mode="out-in"><span :key="titular">{{ titular }}</span></Transition></h1>
       <p class="subtitular">{{ subtitular }}</p>
     </div>
 

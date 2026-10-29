@@ -30,6 +30,7 @@ const fsp = fs.promises;
 const path = require('path');
 const express = require('express');
 const { pool } = require('./db');
+const { detalleError } = require('./errores');
 const auth = require('./auth');
 const { exigirMiembro, autenticarDispositivo, rechazarDispositivo, quien, limpiarTexto } = auth;
 
@@ -333,7 +334,7 @@ function montarRutas(app, ganchos = {}) {
       }, 20000);
       res.on('close', () => clearInterval(espero.latido));
     } catch (e) {
-      if (!res.headersSent) res.status(500).json({ ok: false, mensaje: 'No se pudo consultar la tarea.', detalle: e.message });
+      if (!res.headersSent) res.status(500).json({ ok: false, mensaje: 'No se pudo consultar la tarea.', detalle: detalleError(e) });
     }
   });
 
@@ -396,7 +397,7 @@ function montarRutas(app, ganchos = {}) {
       return res.status(201).json({ ok: true, id, restantes: Math.max(0, tarea.cantidad - tomadas) });
     } catch (e) {
       console.error('Error al guardar la foto:', e.message);
-      return res.status(500).json({ ok: false, mensaje: 'No se pudo guardar la foto.', detalle: e.message });
+      return res.status(500).json({ ok: false, mensaje: 'No se pudo guardar la foto.', detalle: detalleError(e) });
     }
   });
 
@@ -441,7 +442,7 @@ function montarRutas(app, ganchos = {}) {
         cuota: { usado_min: Math.round(usados * 10) / 10, max_min: VIVO_DIA_MAX_MIN, sesion_max_s: VIVO_SESION_MAX_S }
       });
     } catch (e) {
-      res.status(500).json({ ok: false, mensaje: 'No se pudo consultar la camara.', detalle: e.message });
+      res.status(500).json({ ok: false, mensaje: 'No se pudo consultar la camara.', detalle: detalleError(e) });
     }
   });
 
@@ -458,7 +459,7 @@ function montarRutas(app, ganchos = {}) {
       const id = await crearTarea(viviendaId, 'foto', { motivo: 'Foto solicitada', cantidad: 1, usuario: quien(req) });
       res.status(202).json({ ok: true, tarea_id: id });
     } catch (e) {
-      res.status(500).json({ ok: false, mensaje: 'No se pudo solicitar la foto.', detalle: e.message });
+      res.status(500).json({ ok: false, mensaje: 'No se pudo solicitar la foto.', detalle: detalleError(e) });
     }
   });
 
@@ -472,7 +473,7 @@ function montarRutas(app, ganchos = {}) {
           ORDER BY creado_en DESC LIMIT $2`, [viviendaId, limite]);
       res.json({ ok: true, total: r.rowCount, fotos: r.rows });
     } catch (e) {
-      res.status(500).json({ ok: false, mensaje: 'No se pudieron consultar las fotos.', detalle: e.message });
+      res.status(500).json({ ok: false, mensaje: 'No se pudieron consultar las fotos.', detalle: detalleError(e) });
     }
   });
 
@@ -490,7 +491,7 @@ function montarRutas(app, ganchos = {}) {
         .on('error', () => { if (!res.headersSent) res.status(404).json({ ok: false, mensaje: 'El archivo ya no existe.' }); else res.end(); })
         .pipe(res);
     } catch (e) {
-      res.status(500).json({ ok: false, mensaje: 'No se pudo leer la foto.', detalle: e.message });
+      res.status(500).json({ ok: false, mensaje: 'No se pudo leer la foto.', detalle: detalleError(e) });
     }
   });
 
@@ -507,7 +508,7 @@ function montarRutas(app, ganchos = {}) {
       if (registrarAccionFn) await registrarAccionFn(r.rows[0].vivienda_id, 'foto_eliminada', id, '', quien(req));
       res.json({ ok: true });
     } catch (e) {
-      res.status(500).json({ ok: false, mensaje: 'No se pudo borrar la foto.', detalle: e.message });
+      res.status(500).json({ ok: false, mensaje: 'No se pudo borrar la foto.', detalle: detalleError(e) });
     }
   });
 
@@ -530,7 +531,7 @@ function montarRutas(app, ganchos = {}) {
       const restanteDia = Math.max(0, VIVO_DIA_MAX_MIN - usados);
       res.status(201).json({ ok: true, max_s: Math.min(VIVO_SESION_MAX_S, Math.floor(restanteDia * 60)) });
     } catch (e) {
-      res.status(500).json({ ok: false, mensaje: 'No se pudo iniciar la vista en vivo.', detalle: e.message });
+      res.status(500).json({ ok: false, mensaje: 'No se pudo iniciar la vista en vivo.', detalle: detalleError(e) });
     }
   });
 

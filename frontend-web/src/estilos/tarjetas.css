@@ -3,12 +3,13 @@
   position: relative; display: flex; flex-direction: column; text-align: left;
   width: 100%; padding: 0 0 13px; cursor: pointer; overflow: hidden;
   background: var(--papel); border: 1.5px solid var(--linea); border-radius: 18px;
-  transition: border-color .3s, background-color .3s, box-shadow .3s;
+  transition: border-color .3s, background-color .3s, box-shadow .3s,
+    opacity .45s var(--demora, 0s) ease-out, transform .45s var(--demora, 0s) cubic-bezier(.2, .8, .2, 1);
 }
 div.tarjeta { cursor: default; }
 .tarjeta .ilu {
   position: relative; height: 142px; overflow: hidden; display: grid; place-items: center;
-  background: linear-gradient(180deg, #DDE5E0, var(--yeso) 70%);
+  background: linear-gradient(180deg, var(--ilu-a), var(--yeso) 70%);
   transition: background-color .3s;
 }
 .tarjeta .nombre { padding: 11px 14px 0; font-weight: 700; font-size: 15px; letter-spacing: -0.005em; overflow-wrap: anywhere; }
@@ -20,11 +21,25 @@ div.tarjeta { cursor: default; }
 
 .tarjeta.abierta, .tarjeta.actividad, .tarjeta.prueba { border-color: var(--ambar); }
 .tarjeta.abierta .lectura, .tarjeta.actividad .lectura, .tarjeta.prueba .lectura { color: var(--ambar-texto); font-weight: 700; }
-.tarjeta.abierta .ilu, .tarjeta.actividad .ilu { background: linear-gradient(180deg, #F3E3BE, #F7EEDB 75%); }
+.tarjeta.abierta .ilu, .tarjeta.actividad .ilu { background: linear-gradient(180deg, var(--ilu-ambar-a), var(--ilu-ambar-b) 75%); }
 .tarjeta.sin-datos { border-style: dashed; }
 .tarjeta.sin-datos .ilu { filter: grayscale(.85) opacity(.75); }
 .tarjeta.disparado, .tarjeta.sonando { border-color: var(--sirena); background: var(--sirena-claro); animation: aro .8s ease-in-out infinite alternate; }
-.tarjeta.disparado .ilu, .tarjeta.sonando .ilu { background: linear-gradient(180deg, #F3C4BE, var(--sirena-claro) 75%); }
-.tarjeta.disparado .lectura, .tarjeta.sonando .lectura { color: var(--sirena); font-weight: 700; }
+.tarjeta.disparado .ilu, .tarjeta.sonando .ilu { background: linear-gradient(180deg, var(--ilu-alarma-a), var(--sirena-claro) 75%); }
+.tarjeta.disparado .lectura, .tarjeta.sonando .lectura { color: var(--sirena-texto); font-weight: 700; }
 @keyframes aro { from { box-shadow: 0 0 0 0 rgba(210, 47, 39, .45); } to { box-shadow: 0 0 0 6px rgba(210, 47, 39, 0); } }
 
+
+/* Una tarjeta nueva entra deslizandose; las primeras de la rejilla lo hacen en cascada.
+   Es una transicion (no una animacion) para que no se repita al cambiar de estado. */
+@starting-style { .rejilla .tarjeta { opacity: 0; transform: translateY(12px); } }
+.rejilla .tarjeta:nth-child(2) { --demora: .05s; }
+.rejilla .tarjeta:nth-child(3) { --demora: .1s; }
+.rejilla .tarjeta:nth-child(4) { --demora: .15s; }
+.rejilla .tarjeta:nth-child(n+5) { --demora: .2s; }
+
+/* El titular del estado se cruza al cambiar (armada, desarmada, alarma) */
+.titular > span { display: block; }
+.titular-enter-active, .titular-leave-active { transition: opacity .18s, transform .18s; }
+.titular-enter-from { opacity: 0; transform: translateY(6px); }
+.titular-leave-to { opacity: 0; transform: translateY(-6px); }

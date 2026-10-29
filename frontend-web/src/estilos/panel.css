@@ -21,7 +21,7 @@
 #aviso.visible { display: block; }
 #aviso button {
   margin-top: 8px; background: none; border: none; padding: 0;
-  color: var(--sirena); font-weight: 700; text-decoration: underline; cursor: pointer;
+  color: var(--sirena-texto); font-weight: 700; text-decoration: underline; cursor: pointer;
 }
 
 /* ---- Escena: titular, plano y controles ---- */
@@ -44,7 +44,7 @@
   letter-spacing: -0.025em;
   text-wrap: balance;
 }
-.escena.alarma .titular { color: var(--sirena); }
+.escena.alarma .titular { color: var(--sirena-texto); }
 .subtitular { margin: 8px 0 0; font-size: 15px; color: var(--tinta-2); min-height: 1.45em; }
 
 /* ---- Grupos de sensores ---- */

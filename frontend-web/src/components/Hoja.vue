@@ -2,7 +2,7 @@
 <script setup>
 import { ref, watch, onMounted } from 'vue';
 
-const props = defineProps({ modelValue: Boolean, titulo: { type: String, default: '' } });
+const props = defineProps({ modelValue: Boolean, titulo: { type: String, default: '' }, lateral: Boolean });
 const emit = defineEmits(['update:modelValue', 'cerrado']);
 const el = ref(null);
 
@@ -20,6 +20,11 @@ function cerrar() {
 watch(() => props.modelValue, (v) => (v ? abrir() : cerrar()), { flush: 'post' });
 onMounted(() => { if (props.modelValue) abrir(); });
 
+// En el panel lateral, tocar fuera (el fondo) lo cierra
+function alTocar(e) {
+  if (props.lateral && e.target === el.value) emit('update:modelValue', false);
+}
+
 // Tambien se dispara con Escape o al cerrar desde dentro
 function alCerrar() {
   emit('update:modelValue', false);
@@ -28,7 +33,7 @@ function alCerrar() {
 </script>
 
 <template>
-  <dialog ref="el" class="hoja" :aria-labelledby="titulo || undefined" @close="alCerrar">
+  <dialog ref="el" class="hoja" :class="{ lateral }" :aria-labelledby="titulo || undefined" @close="alCerrar" @click="alTocar">
     <slot />
   </dialog>
 </template>

@@ -22,6 +22,7 @@
 const crypto = require('crypto');
 const { promisify } = require('util');
 const { pool } = require('./db');
+const { detalleError } = require('./errores');
 
 const scrypt = promisify(crypto.scrypt);
 
@@ -315,7 +316,7 @@ function montarRutas(app, ganchos = {}) {
       const hay = await hayUsuarios();
       res.json({ ok: true, hay_usuarios: hay, registro_abierto: REGISTRO_ABIERTO || !hay });
     } catch (e) {
-      res.status(500).json({ ok: false, mensaje: 'No se pudo consultar.', detalle: e.message });
+      res.status(500).json({ ok: false, mensaje: 'No se pudo consultar.', detalle: detalleError(e) });
     }
   });
 
@@ -390,7 +391,7 @@ function montarRutas(app, ganchos = {}) {
     } catch (e) {
       await cliente.query('ROLLBACK').catch(() => {});
       console.error('Error al registrar:', e.message);
-      res.status(500).json({ ok: false, mensaje: 'No se pudo crear la cuenta.', detalle: e.message });
+      res.status(500).json({ ok: false, mensaje: 'No se pudo crear la cuenta.', detalle: detalleError(e) });
     } finally {
       cliente.release();
     }
@@ -424,7 +425,7 @@ function montarRutas(app, ganchos = {}) {
       res.json({ ok: true, usuario: { id: u.id, email: u.email, nombre: u.nombre } });
     } catch (e) {
       console.error('Error al iniciar sesion:', e.message);
-      res.status(500).json({ ok: false, mensaje: 'No se pudo iniciar sesion.', detalle: e.message });
+      res.status(500).json({ ok: false, mensaje: 'No se pudo iniciar sesion.', detalle: detalleError(e) });
     }
   });
 
@@ -450,7 +451,7 @@ function montarRutas(app, ganchos = {}) {
     try {
       res.json({ ok: true, usuario: req.usuario, viviendas: await listarViviendas(req.usuario.id) });
     } catch (e) {
-      res.status(500).json({ ok: false, mensaje: 'No se pudo consultar la cuenta.', detalle: e.message });
+      res.status(500).json({ ok: false, mensaje: 'No se pudo consultar la cuenta.', detalle: detalleError(e) });
     }
   });
 
@@ -469,7 +470,7 @@ function montarRutas(app, ganchos = {}) {
       await pool.query('DELETE FROM sesiones WHERE usuario_id = $1 AND id_hash <> $2', [req.usuario.id, req.sesionHash]);
       res.json({ ok: true, mensaje: 'Contrasena actualizada.' });
     } catch (e) {
-      res.status(500).json({ ok: false, mensaje: 'No se pudo cambiar la contrasena.', detalle: e.message });
+      res.status(500).json({ ok: false, mensaje: 'No se pudo cambiar la contrasena.', detalle: detalleError(e) });
     }
   });
 
@@ -479,7 +480,7 @@ function montarRutas(app, ganchos = {}) {
     try {
       res.json({ ok: true, viviendas: await listarViviendas(req.usuario.id) });
     } catch (e) {
-      res.status(500).json({ ok: false, mensaje: 'No se pudieron consultar las viviendas.', detalle: e.message });
+      res.status(500).json({ ok: false, mensaje: 'No se pudieron consultar las viviendas.', detalle: detalleError(e) });
     }
   });
 
@@ -499,7 +500,7 @@ function montarRutas(app, ganchos = {}) {
       // El token se muestra una sola vez; despues solo existe su resumen
       res.status(201).json({ ok: true, vivienda: { id, nombre, rol: 'propietario', tiene_token: true, miembros: 1 }, token });
     } catch (e) {
-      res.status(500).json({ ok: false, mensaje: 'No se pudo crear la vivienda.', detalle: e.message });
+      res.status(500).json({ ok: false, mensaje: 'No se pudo crear la vivienda.', detalle: detalleError(e) });
     }
   });
 
@@ -511,7 +512,7 @@ function montarRutas(app, ganchos = {}) {
       await pool.query('UPDATE viviendas SET nombre = $2 WHERE id = $1', [req.params.id, nombre]);
       res.json({ ok: true });
     } catch (e) {
-      res.status(500).json({ ok: false, mensaje: 'No se pudo renombrar.', detalle: e.message });
+      res.status(500).json({ ok: false, mensaje: 'No se pudo renombrar.', detalle: detalleError(e) });
     }
   });
 
@@ -525,7 +526,7 @@ function montarRutas(app, ganchos = {}) {
       if (ganchos.registrarAccion) await ganchos.registrarAccion(req.params.id, 'token_regenerado', '', '', quien(req));
       res.json({ ok: true, token });
     } catch (e) {
-      res.status(500).json({ ok: false, mensaje: 'No se pudo generar el token.', detalle: e.message });
+      res.status(500).json({ ok: false, mensaje: 'No se pudo generar el token.', detalle: detalleError(e) });
     }
   });
 
@@ -541,7 +542,7 @@ function montarRutas(app, ganchos = {}) {
       await pool.query('DELETE FROM viviendas WHERE id = $1', [req.params.id]);
       res.json({ ok: true, mensaje: 'Vivienda eliminada con todos sus datos.' });
     } catch (e) {
-      res.status(500).json({ ok: false, mensaje: 'No se pudo eliminar la vivienda.', detalle: e.message });
+      res.status(500).json({ ok: false, mensaje: 'No se pudo eliminar la vivienda.', detalle: detalleError(e) });
     }
   });
 
@@ -556,7 +557,7 @@ function montarRutas(app, ganchos = {}) {
           WHERE m.vivienda_id = $1 ORDER BY m.rol DESC, m.desde`, [req.params.id]);
       res.json({ ok: true, miembros: r.rows, soy: req.usuario.id });
     } catch (e) {
-      res.status(500).json({ ok: false, mensaje: 'No se pudieron consultar los miembros.', detalle: e.message });
+      res.status(500).json({ ok: false, mensaje: 'No se pudieron consultar los miembros.', detalle: detalleError(e) });
     }
   });
 
@@ -579,7 +580,7 @@ function montarRutas(app, ganchos = {}) {
       if (ganchos.registrarAccion) await ganchos.registrarAccion(req.params.id, propio ? 'salio_de_vivienda' : 'miembro_eliminado', uid, '', quien(req));
       res.json({ ok: true });
     } catch (e) {
-      res.status(500).json({ ok: false, mensaje: 'No se pudo quitar al miembro.', detalle: e.message });
+      res.status(500).json({ ok: false, mensaje: 'No se pudo quitar al miembro.', detalle: detalleError(e) });
     }
   });
 
@@ -597,7 +598,7 @@ function montarRutas(app, ganchos = {}) {
         [codigo, req.params.id, req.usuario.id, String(horas)]);
       res.status(201).json({ ok: true, codigo: formatearCodigo(codigo), horas });
     } catch (e) {
-      res.status(500).json({ ok: false, mensaje: 'No se pudo crear la invitacion.', detalle: e.message });
+      res.status(500).json({ ok: false, mensaje: 'No se pudo crear la invitacion.', detalle: detalleError(e) });
     }
   });
 
@@ -624,7 +625,7 @@ function montarRutas(app, ganchos = {}) {
       res.json({ ok: true, vivienda_id: viviendaId });
     } catch (e) {
       await cliente.query('ROLLBACK').catch(() => {});
-      res.status(500).json({ ok: false, mensaje: 'No se pudo aceptar la invitacion.', detalle: e.message });
+      res.status(500).json({ ok: false, mensaje: 'No se pudo aceptar la invitacion.', detalle: detalleError(e) });
     } finally {
       cliente.release();
     }

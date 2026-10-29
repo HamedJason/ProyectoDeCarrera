@@ -1,28 +1,28 @@
 /* ---- Dialogo de edicion ---- */
-dialog.hoja { width: min(440px, calc(100vw - 28px)); max-height: calc(100vh - 32px); padding: 0; border: 1px solid var(--linea); border-radius: 22px; background: var(--papel); color: var(--tinta); box-shadow: 0 24px 60px rgba(21, 48, 43, .28); }
-dialog.hoja::backdrop { background: rgba(21, 48, 43, .45); }
+dialog.hoja { width: min(440px, calc(100vw - 28px)); max-height: calc(100vh - 32px); padding: 0; border: 1px solid var(--linea); border-radius: 22px; background: var(--papel); color: var(--tinta); box-shadow: 0 24px 60px var(--sombra-hoja); }
+dialog.hoja::backdrop { background: var(--velo); }
 .hoja form, .hoja .hoja-cuerpo { padding: 22px 20px 18px; display: grid; gap: 14px; }
 .hoja h3 { margin: 0; font-size: 22px; font-weight: 800; font-stretch: 90%; letter-spacing: -0.02em; }
 .hoja h4 { margin: 4px 0 0; font-size: 15px; font-weight: 800; letter-spacing: -0.01em; }
 .hoja label, .hoja legend { display: block; font-size: 13px; font-weight: 600; color: var(--tinta-2); margin-bottom: 5px; padding: 0; }
 .hoja fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
-.hoja input[type=text], .hoja input[type=password], .hoja input[type=email] { width: 100%; font: inherit; font-size: 16px; padding: 11px 12px; background: #fff; color: var(--tinta); border: 1.5px solid var(--linea); border-radius: 10px; }
+.hoja input[type=text], .hoja input[type=password], .hoja input[type=email] { width: 100%; font: inherit; font-size: 16px; padding: 11px 12px; background: var(--campo); color: var(--tinta); border: 1.5px solid var(--borde-control); border-radius: 10px; }
 .hoja input[type=text]:focus, .hoja input[type=password]:focus, .hoja input[type=email]:focus { outline: 3px solid var(--pino-claro); border-color: var(--pino); }
 .tipos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 .tipos label { position: relative; margin: 0; }
 .tipos input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
-.tipos span { display: block; text-align: center; padding: 10px 4px; font-size: 14px; font-weight: 700; color: var(--tinta); background: #fff; border: 1.5px solid var(--linea); border-radius: 10px; }
-.tipos input:checked + span { background: var(--pino); border-color: var(--pino); color: #fff; }
+.tipos span { display: block; text-align: center; padding: 10px 4px; font-size: 14px; font-weight: 700; color: var(--tinta); background: var(--campo); border: 1.5px solid var(--borde-control); border-radius: 10px; }
+.tipos input:checked + span { background: var(--pino); border-color: var(--pino); color: var(--sobre-pino); }
 .tipos input:focus-visible + span { outline: 3px solid var(--pino); outline-offset: 2px; }
 .tipos input:disabled + span { opacity: .4; }
 .tipos input:disabled { cursor: not-allowed; }
 .hoja .ayuda { font-size: 12.5px; color: var(--tinta-2); margin: 0; }
-.hoja .error, .error-msg { display: none; font-size: 14px; color: var(--sirena); font-weight: 600; margin: 0; }
+.hoja .error, .error-msg { display: none; font-size: 14px; color: var(--sirena-texto); font-weight: 600; margin: 0; }
 .hoja .error.visible, .error-msg.visible { display: block; }
 .dlg-botones { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 2px; }
 .dlg-botones .boton { padding: 13px 10px; font-size: 16px; }
-.boton.secundario { background: transparent; border-color: var(--linea); color: var(--tinta); }
-.boton-eliminar { grid-column: 1 / -1; background: none; border: 0; padding: 8px; font-size: 14px; font-weight: 600; color: var(--sirena); cursor: pointer; text-decoration: underline; }
+.boton.secundario { background: transparent; border-color: var(--borde-control); color: var(--tinta); }
+.boton-eliminar { grid-column: 1 / -1; background: none; border: 0; padding: 8px; font-size: 14px; font-weight: 600; color: var(--sirena-texto); cursor: pointer; text-decoration: underline; }
 .boton-eliminar[hidden] { display: none; }
 
 /* ---- Botones ---- */
@@ -33,9 +33,9 @@ dialog.hoja::backdrop { background: rgba(21, 48, 43, .45); }
   cursor: pointer; transition: transform .08s, opacity .15s, background-color .2s;
 }
 .boton:active { transform: scale(.985); }
-.boton:disabled { opacity: .55; cursor: default; }
-.boton.armar { background: var(--pino); color: #fff; }
+.boton:disabled { opacity: .55; cursor: not-allowed; }
+.boton.armar { background: var(--pino); color: var(--sobre-pino); }
 .boton.desarmar { background: transparent; border-color: var(--tinta); color: var(--tinta); }
-.boton.apagar-alarma { background: var(--sirena); color: #fff; font-size: 19px; padding: 18px 16px; }
+.boton.apagar-alarma { background: var(--sirena); color: var(--sobre-sirena); font-size: 19px; padding: 18px 16px; }
 .boton[hidden] { display: none; }
 

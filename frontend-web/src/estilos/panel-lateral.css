@@ -1,0 +1,41 @@
+/* ---- Boton "Cuenta" de la barra superior ---- */
+.cuenta-btn { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 4px 12px 4px 4px; background: var(--papel); border: 1.5px solid var(--borde-control); border-radius: 999px; font-weight: 700; font-size: 14px; }
+.cuenta-btn:hover { background: var(--pino-claro); }
+.avatar { display: grid; place-items: center; width: 34px; height: 34px; flex: none; border-radius: 50%; background: var(--pino); color: var(--sobre-pino); font-weight: 800; font-size: 16px; }
+.barra-der { display: flex; align-items: center; gap: 12px; min-width: 0; }
+
+/* ---- Panel lateral: la hoja modal se pega al borde derecho ---- */
+dialog.hoja.lateral {
+  position: fixed; inset: 0 0 0 auto; margin: 0; width: min(360px, 100vw); max-width: 100vw; height: 100dvh; max-height: 100dvh;
+  border-radius: 22px 0 0 22px; border-width: 0 0 0 1px; overflow-y: auto;
+}
+dialog.hoja.lateral[open] { animation: panel-entra .28s cubic-bezier(.2, .8, .2, 1); }
+@keyframes panel-entra { from { transform: translateX(32px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+.panel-cuerpo { display: grid; gap: 22px; padding: 20px 18px calc(22px + env(safe-area-inset-bottom)); align-content: start; min-height: 100%; }
+.panel-cab { display: flex; align-items: center; gap: 12px; }
+.panel-cab .avatar { width: 46px; height: 46px; font-size: 20px; }
+.panel-quien { min-width: 0; flex: 1; }
+.panel-quien h3 { margin: 0; font-size: 19px; overflow-wrap: anywhere; }
+.panel-quien p { margin: 2px 0 0; font-size: 13px; color: var(--tinta-2); overflow-wrap: anywhere; }
+.panel-cerrar { flex: none; display: grid; place-items: center; width: 44px; height: 44px; background: none; border: 1.5px solid var(--borde-control); border-radius: 50%; }
+.panel-cerrar svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+.panel-bloque { display: grid; gap: 10px; }
+.panel-bloque h4 { margin: 0; }
+.panel-dato { margin: 0; display: grid; gap: 2px; }
+.panel-dato span { font-size: 13px; color: var(--tinta-2); }
+.panel-accion { width: 100%; min-height: 44px; text-align: left; border-color: var(--borde-control); }
+
+.temas { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; border: 0; margin: 0; padding: 0; min-width: 0; }
+.temas legend { padding: 0; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--tinta-2); }
+.temas label { position: relative; margin: 0; }
+.temas input { position: absolute; inset: 0; opacity: 0; margin: 0; }
+.temas span { display: block; text-align: center; padding: 11px 4px; min-height: 44px; font-size: 14px; font-weight: 700; background: var(--campo); border: 1.5px solid var(--borde-control); border-radius: 10px; }
+.temas input:checked + span { background: var(--pino); border-color: var(--pino); color: var(--sobre-pino); }
+.temas input:focus-visible + span { outline: 3px solid var(--pino); outline-offset: 2px; }
+.panel-fila { border: 0 !important; padding: 6px 0 0; }
+.panel-fila:first-of-type { border-top: 0; }
+.panel-pie { margin-top: auto; display: grid; gap: 12px; padding-top: 6px; }
+.panel-pie p { margin: 0; font-size: 12px; line-height: 1.6; color: var(--tinta-2); }
+
+@media (max-width: 420px) { .cuenta-btn .cuenta-texto { display: none; } .cuenta-btn { padding-right: 4px; } .conexion { font-size: 12px; } }

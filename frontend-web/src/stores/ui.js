@@ -6,6 +6,7 @@ import { vivienda } from './sesion.js';
 export const ui = reactive({
   sensor: false,          // dialogo de alta/edicion de sensor
   sensorEditado: null,    // sensor que se edita; null cuando se agrega uno nuevo
+  panel: false,           // panel lateral (cuenta y apariencia)
   casas: false,           // viviendas y cuenta
   gestion: false,         // administracion de la vivienda actual
   tokenPendiente: null,   // token recien generado, que se muestra una sola vez
@@ -18,5 +19,5 @@ export function abrirSensor(s) { ui.sensorEditado = s || null; ui.sensor = true;
 export function abrirCasas() { ui.casas = true; }
 export function abrirGestion() { if (vivienda.value) ui.gestion = true; }
 export function cerrarTodo() {
-  ui.sensor = ui.casas = ui.gestion = ui.foto = ui.vivo = false;
+  ui.panel = ui.sensor = ui.casas = ui.gestion = ui.foto = ui.vivo = false;
 }

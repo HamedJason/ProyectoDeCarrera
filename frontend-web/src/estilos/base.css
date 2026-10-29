@@ -1,5 +1,5 @@
 /*
- * Identidad visual.
+ * Sentinel Home. Identidad visual.
  * Cada sensor es una tarjeta con su propia ilustracion animada: las puertas y
  * ventanas se ven de frente y se abren cuando el contacto magnetico se separa,
  * el detector de movimiento emite ondas al detectar y la sirena gira su haz.
@@ -19,24 +19,92 @@
 }
 
 :root {
+  /* Modo claro. Cada color tiene un solo significado: pino = armado, ambar = actividad, sirena = alarma. */
   --yeso: #E6EBE7;
   --papel: #F6F8F5;
+  --campo: #FFFFFF;
   --tinta: #15302B;
   --tinta-2: #4B625C;
   --linea: #C5D0CA;
+  --borde-control: #7F918A;       /* bordes de campos y botones: 3:1 contra papel y campo */
   --pino: #17695A;
   --pino-claro: #D3E6DF;
+  --sobre-pino: #FFFFFF;
   --sirena: #D22F27;
+  --sirena-texto: #B3231C;        /* sirena como texto sobre fondos claros: 5:1 */
   --sirena-claro: #F8DAD6;
+  --sobre-sirena: #FFFFFF;
   --ambar: #E39B12;
   --ambar-texto: #8A5A00;
+  --ambar-claro: #FBE6B3;
+  --ambar-suave: #FFF7E3;
+  --interruptor-off: #7F918A;
+  --cam-fondo: rgba(255, 255, 255, .6);
+  --cam-fondo-alarma: rgba(255, 255, 255, .7);
+  --sombra-hoja: rgba(21, 48, 43, .28);
+  --velo: rgba(21, 48, 43, .45);
+  /* Fondos de las ilustraciones de cada tarjeta */
+  --ilu-a: #DDE5E0;
+  --ilu-ambar-a: #F3E3BE;
+  --ilu-ambar-b: #F7EEDB;
+  --ilu-alarma-a: #F3C4BE;
+  /* Objetos dibujados (marcos, placas, bases) */
+  --obj-marco: #8C9A94;
+  --obj-led-off: #9AA8A2;
+  --obj-vidrio: #B4C0BA;
+  --obj-placa: linear-gradient(160deg, #F7F9F5, #D4DDD7);
+  --obj-sombra: #B5C1BA;
+  --obj-domo-a: #F3F5F0;
+  --obj-domo-b: #C6D1CB;
+  --obj-base: linear-gradient(#BAC5BF, #97A49E);
   color-scheme: light;
+}
+
+/* Modo oscuro: gris neutro y calido que no cansa, mismos tonos con menos saturacion. */
+:root[data-tema="oscuro"] {
+  --yeso: #262624;
+  --papel: #30302E;
+  --campo: #3A3A37;
+  --tinta: #ECE8DC;
+  --tinta-2: #B3AFA2;
+  --linea: #4A4945;
+  --borde-control: #8A8780;
+  --pino: #6FB3A1;
+  --pino-claro: #284038;
+  --sobre-pino: #14201C;
+  --sirena: #E5766D;
+  --sirena-texto: #F0A29B;
+  --sirena-claro: #3F2927;
+  --sobre-sirena: #14201C;
+  --ambar: #D9A441;
+  --ambar-texto: #E3B866;
+  --ambar-claro: #4A3D22;
+  --ambar-suave: #3A3226;
+  --interruptor-off: #6B6963;
+  --cam-fondo: rgba(0, 0, 0, .18);
+  --cam-fondo-alarma: rgba(0, 0, 0, .25);
+  --sombra-hoja: rgba(0, 0, 0, .5);
+  --velo: rgba(0, 0, 0, .6);
+  --ilu-a: #3A3A37;
+  --ilu-ambar-a: #4A3D22;
+  --ilu-ambar-b: #3A3226;
+  --ilu-alarma-a: #5A3330;
+  --obj-marco: #7C7A73;
+  --obj-led-off: #5F5D58;
+  --obj-vidrio: #8E8C85;
+  --obj-placa: linear-gradient(160deg, #B9B6AC, #8F8C84);
+  --obj-sombra: #6B6963;
+  --obj-domo-a: #BDBAB0;
+  --obj-domo-b: #928F86;
+  --obj-base: linear-gradient(#7C7A73, #5F5D58);
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
 body {
   margin: 0;
+  transition: background-color .3s, color .3s;
   background: var(--yeso);
   color: var(--tinta);
   font-family: "Bricolage", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -47,7 +115,14 @@ body {
 }
 
 button { font: inherit; color: inherit; }
+/* Todo lo que se puede activar muestra la mano; lo deshabilitado, no */
+a[href], button, summary, select, label[for], [role="button"], [role="tab"], [role="switch"],
+input[type="checkbox"], input[type="radio"], input[type="range"] { cursor: pointer; }
+button:disabled, [aria-disabled="true"], input:disabled, select:disabled { cursor: not-allowed; }
 :focus-visible { outline: 3px solid var(--pino); outline-offset: 3px; }
 
 .envoltura { max-width: 760px; margin: 0 auto; padding: 14px 16px 44px; }
 .columna { min-width: 0; }
+
+/* Texto de ayuda dentro de los campos: mismo contraste que el texto secundario */
+::placeholder { color: var(--tinta-2); opacity: .85; }

@@ -3,17 +3,17 @@
 .vivienda-btn svg { width: 16px; height: 16px; flex-shrink: 0; fill: none; stroke: var(--tinta-2); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 
 /* ---- Bandas de aviso ---- */
-.banda { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: #FBEFD2; border-left: 4px solid var(--ambar); border-radius: 6px; padding: 12px 14px; margin-bottom: 14px; font-size: 14px; }
+.banda { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--ambar-claro); border-left: 4px solid var(--ambar); border-radius: 6px; padding: 12px 14px; margin-bottom: 14px; font-size: 14px; }
 .banda[hidden] { display: none; }
 .banda.roja { background: var(--sirena-claro); border-left-color: var(--sirena); }
 .banda button { flex-shrink: 0; background: none; border: 1.5px solid currentColor; border-radius: 8px; padding: 6px 10px; font-weight: 700; font-size: 13px; cursor: pointer; color: var(--ambar-texto); }
-.banda.roja button { color: var(--sirena); }
+.banda.roja button { color: var(--sirena-texto); }
 
 .tarjeta.nuevo::after { content: "Nuevo"; position: absolute; top: 9px; left: 9px; background: var(--ambar); color: #2B1A00; font-size: 11px; font-weight: 800; letter-spacing: .03em; padding: 2px 8px; border-radius: 999px; z-index: 5; }
 
 /* ---- Listas dentro de las hojas ---- */
 .lista-casas { display: grid; gap: 8px; }
-.casa { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; text-align: left; padding: 12px 14px; background: #fff; border: 1.5px solid var(--linea); border-radius: 12px; cursor: pointer; }
+.casa { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; text-align: left; padding: 12px 14px; background: var(--campo); border: 1.5px solid var(--borde-control); border-radius: 12px; cursor: pointer; }
 .casa.actual { border-color: var(--pino); background: var(--pino-claro); }
 .casa .n { font-weight: 700; overflow-wrap: anywhere; }
 .casa .r { font-size: 12.5px; color: var(--tinta-2); }
@@ -23,9 +23,9 @@
 .cuenta-caja .quien { flex: 1 1 100%; font-size: 14px; color: var(--tinta-2); }
 .fila-miembro { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--linea); font-size: 15px; }
 .fila-miembro .r { font-size: 12.5px; color: var(--tinta-2); }
-.fila-miembro button { background: none; border: 0; color: var(--sirena); font-weight: 600; font-size: 13px; text-decoration: underline; cursor: pointer; }
-.codigo { font-family: ui-monospace, Consolas, monospace; font-size: 26px; font-weight: 800; letter-spacing: .12em; text-align: center; padding: 12px; background: #fff; border: 1.5px dashed var(--pino); border-radius: 12px; }
-.token { font-family: ui-monospace, Consolas, monospace; font-size: 13px; word-break: break-all; padding: 12px; background: #fff; border: 1.5px dashed var(--ambar); border-radius: 12px; user-select: all; }
+.fila-miembro button { background: none; border: 0; color: var(--sirena-texto); font-weight: 600; font-size: 13px; text-decoration: underline; cursor: pointer; }
+.codigo { font-family: ui-monospace, Consolas, monospace; font-size: 26px; font-weight: 800; letter-spacing: .12em; text-align: center; padding: 12px; background: var(--campo); border: 1.5px dashed var(--pino); border-radius: 12px; }
+.token { font-family: ui-monospace, Consolas, monospace; font-size: 13px; word-break: break-all; padding: 12px; background: var(--campo); border: 1.5px dashed var(--ambar); border-radius: 12px; user-select: all; }
 .caja-token[hidden] { display: none; }
 .oculto { display: none !important; }
 .hoja .nota { font-size: 13px; color: var(--tinta-2); margin: 0; }

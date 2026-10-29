@@ -29,6 +29,7 @@ export const ganchos = { alPerderAcceso: async () => {} };
 
 let temporizador = null;
 let fallosSeguidos = 0;
+let enCurso = false;       // una consulta lenta no debe encimarse con la siguiente
 let primeraCarga = true;   // evita alertar por una alarma que ya estaba activa al abrir la app
 
 // Limpia lo que pertenecia a la vivienda anterior para no mezclar datos
@@ -40,10 +41,13 @@ export function reiniciarVistas() {
   primeraCarga = true;
   fallosSeguidos = 0;
   restaurarTitulo();
+  enCurso = false;
 }
 
 export async function refrescar(manual = false) {
   if (!vivienda.value) return;
+  if (enCurso) return;
+  enCurso = true;
   const casa = vivienda.value;
   try {
     const q = encodeURIComponent(casa);
@@ -81,6 +85,8 @@ export async function refrescar(manual = false) {
     fallosSeguidos++;
     // Se avisa al segundo fallo, para no alarmar por un parpadeo de la red
     if (manual || fallosSeguidos >= 2) mostrarAviso(mensajeDeError(e));
+  } finally {
+    enCurso = false;
   }
 }
 

@@ -19,6 +19,7 @@ const webpush = require('web-push');
 const crypto = require('crypto');
 const { pool, inicializarEsquema } = require('./db');
 const auth = require('./auth');
+const { detalleError } = require('./errores');
 const camara = require('./camara');
 const eventosCamara = require('./eventos_camara');
 const camaraRtsp = require('./camara_rtsp');
@@ -103,7 +104,7 @@ function validarMedicion(cuerpo) {
 
   if (cuerpo.valor !== undefined && cuerpo.valor !== null && cuerpo.valor !== '') {
     const valorNumerico = Number(cuerpo.valor);
-    if (Number.isNaN(valorNumerico)) {
+    if (!Number.isFinite(valorNumerico)) {
       errores.push('El campo "valor" debe ser numerico.');
     }
   }
@@ -130,7 +131,7 @@ app.get('/salud', async (_req, res) => {
       hora_servidor: r.rows[0].hora
     });
   } catch (e) {
-    res.status(500).json({ estado: 'error', base_de_datos: 'sin conexion', detalle: e.message });
+    res.status(500).json({ estado: 'error', base_de_datos: 'sin conexion', detalle: detalleError(e) });
   }
 });
 
@@ -187,7 +188,7 @@ app.post('/mediciones', async (req, res) => {
     return res.status(500).json({
       ok: false,
       mensaje: 'No se pudo registrar la medicion en la base de datos.',
-      detalle: e.message
+      detalle: detalleError(e)
     });
   }
 });
@@ -224,7 +225,7 @@ app.get('/mediciones', async (req, res) => {
     return res.status(500).json({
       ok: false,
       mensaje: 'No se pudieron consultar las mediciones.',
-      detalle: e.message
+      detalle: detalleError(e)
     });
   }
 });
@@ -255,7 +256,7 @@ app.get('/mediciones/ultima', async (req, res) => {
     }
     return res.json({ ok: true, medicion: r.rows[0] });
   } catch (e) {
-    return res.status(500).json({ ok: false, mensaje: 'Error al consultar.', detalle: e.message });
+    return res.status(500).json({ ok: false, mensaje: 'Error al consultar.', detalle: detalleError(e) });
   }
 });
 
@@ -379,7 +380,7 @@ app.get('/sensores', async (req, res) => {
       'SELECT nodo_id, ultimo_visto, rssi, en_linea FROM nodos WHERE vivienda_id = $1 ORDER BY nodo_id', [viviendaId]);
     return res.json({ ok: true, total: sensores.length, sensores, nodos: nodos.rows });
   } catch (e) {
-    return res.status(500).json({ ok: false, mensaje: 'No se pudieron consultar los sensores.', detalle: e.message });
+    return res.status(500).json({ ok: false, mensaje: 'No se pudieron consultar los sensores.', detalle: detalleError(e) });
   }
 });
 
@@ -409,7 +410,7 @@ app.post('/sensores', async (req, res) => {
     const [sensor] = await listarSensores(vivienda_id, r.rows[0].id);
     return res.status(201).json({ ok: true, sensor });
   } catch (e) {
-    return res.status(500).json({ ok: false, mensaje: 'No se pudo agregar el sensor.', detalle: e.message });
+    return res.status(500).json({ ok: false, mensaje: 'No se pudo agregar el sensor.', detalle: detalleError(e) });
   }
 });
 
@@ -453,7 +454,7 @@ app.patch('/sensores/:id', async (req, res) => {
     const [sensor] = await listarSensores(previo.vivienda_id, id);
     return res.json({ ok: true, sensor });
   } catch (e) {
-    return res.status(500).json({ ok: false, mensaje: 'No se pudo editar el sensor.', detalle: e.message });
+    return res.status(500).json({ ok: false, mensaje: 'No se pudo editar el sensor.', detalle: detalleError(e) });
   }
 });
 
@@ -472,7 +473,7 @@ app.delete('/sensores/:id', async (req, res) => {
     await registrarAccion(f.vivienda_id, 'sensor_eliminado', f.sensor_id, f.nombre, quien(req));
     return res.json({ ok: true, mensaje: 'Sensor eliminado.' });
   } catch (e) {
-    return res.status(500).json({ ok: false, mensaje: 'No se pudo eliminar el sensor.', detalle: e.message });
+    return res.status(500).json({ ok: false, mensaje: 'No se pudo eliminar el sensor.', detalle: detalleError(e) });
   }
 });
 
@@ -700,7 +701,7 @@ app.post('/nodos/latido', async (req, res) => {
     if (sensoresNuevos) console.log(`Sensores nuevos detectados en ${viviendaId}: ${sensoresNuevos}`);
     return res.json({ ok: true, sensores_nuevos: sensoresNuevos });
   } catch (e) {
-    return res.status(500).json({ ok: false, mensaje: 'No se pudo registrar el latido.', detalle: e.message });
+    return res.status(500).json({ ok: false, mensaje: 'No se pudo registrar el latido.', detalle: detalleError(e) });
   }
 });
 
@@ -864,7 +865,7 @@ app.get('/estado', async (req, res) => {
       hub_en_linea: Boolean(visto) && Date.now() - new Date(visto).getTime() < UMBRAL_CONCENTRADOR_MS
     });
   } catch (e) {
-    return res.status(500).json({ ok: false, mensaje: 'No se pudo consultar el estado.', detalle: e.message });
+    return res.status(500).json({ ok: false, mensaje: 'No se pudo consultar el estado.', detalle: detalleError(e) });
   }
 });
 
@@ -954,7 +955,7 @@ app.post('/estado', async (req, res) => {
     console.log(`Estado actualizado: ${vivienda_id} -> armado=${nuevoArmado} silencioso=${nuevoSilencio} salida=${nuevoActuador} alarma=${nuevaAlarma}`);
     return res.json({ ok: true, mensaje: 'Estado actualizado.', ...r.rows[0] });
   } catch (e) {
-    return res.status(500).json({ ok: false, mensaje: 'No se pudo actualizar el estado.', detalle: e.message });
+    return res.status(500).json({ ok: false, mensaje: 'No se pudo actualizar el estado.', detalle: detalleError(e) });
   }
 });
 
@@ -1035,7 +1036,7 @@ app.post('/alarma', async (req, res) => {
     }
     return res.json({ ok: true, aplicada: true, ...r.rows[0] });
   } catch (e) {
-    return res.status(500).json({ ok: false, mensaje: 'No se pudo actualizar la alarma.', detalle: e.message });
+    return res.status(500).json({ ok: false, mensaje: 'No se pudo actualizar la alarma.', detalle: detalleError(e) });
   }
 });
 
@@ -1072,7 +1073,7 @@ app.post('/limpiar', async (req, res) => {
     console.log(`Historial limpiado: ${vivienda_id} -> ${JSON.stringify(borrado)}`);
     return res.json({ ok: true, mensaje: 'Historial borrado.', borrado });
   } catch (e) {
-    return res.status(500).json({ ok: false, mensaje: 'No se pudo borrar el historial.', detalle: e.message });
+    return res.status(500).json({ ok: false, mensaje: 'No se pudo borrar el historial.', detalle: detalleError(e) });
   }
 });
 
@@ -1104,7 +1105,7 @@ app.get('/acciones', async (req, res) => {
     );
     return res.json({ ok: true, total: r.rowCount, acciones: r.rows });
   } catch (e) {
-    return res.status(500).json({ ok: false, mensaje: 'No se pudieron consultar las acciones.', detalle: e.message });
+    return res.status(500).json({ ok: false, mensaje: 'No se pudieron consultar las acciones.', detalle: detalleError(e) });
   }
 });
 
@@ -1133,7 +1134,7 @@ app.get('/comando', async (req, res) => {
       actuador_activo: estado.actuador_activo
     });
   } catch (e) {
-    return res.status(500).json({ ok: false, mensaje: 'Error al consultar.', detalle: e.message });
+    return res.status(500).json({ ok: false, mensaje: 'Error al consultar.', detalle: detalleError(e) });
   }
 });
 
@@ -1162,7 +1163,7 @@ app.post('/comando', async (req, res) => {
       actuador_activo
     });
   } catch (e) {
-    return res.status(500).json({ ok: false, mensaje: 'Error al aplicar el comando.', detalle: e.message });
+    return res.status(500).json({ ok: false, mensaje: 'Error al aplicar el comando.', detalle: detalleError(e) });
   }
 });
 
@@ -1201,7 +1202,7 @@ app.post('/push/suscribir', async (req, res) => {
     );
     res.json({ ok: true });
   } catch (e) {
-    res.status(500).json({ ok: false, mensaje: 'No se pudo guardar la suscripcion.', detalle: e.message });
+    res.status(500).json({ ok: false, mensaje: 'No se pudo guardar la suscripcion.', detalle: detalleError(e) });
   }
 });
 
@@ -1212,7 +1213,7 @@ app.post('/push/cancelar', auth.requiereSesion, async (req, res) => {
     await pool.query('DELETE FROM suscripciones_push WHERE endpoint = $1', [endpoint]);
     res.json({ ok: true });
   } catch (e) {
-    res.status(500).json({ ok: false, mensaje: 'No se pudo cancelar la suscripcion.', detalle: e.message });
+    res.status(500).json({ ok: false, mensaje: 'No se pudo cancelar la suscripcion.', detalle: detalleError(e) });
   }
 });
 
@@ -1225,7 +1226,7 @@ app.post('/push/prueba', auth.requiereSesion, async (req, res) => {
     const ok = await enviarPush(r.rows[0], { titulo: 'Notificación de prueba', cuerpo: 'Las notificaciones push funcionan.', etiqueta: 'prueba', url: '/' });
     res.json({ ok, mensaje: ok ? 'Enviada.' : 'El servicio de push rechazo el envio.' });
   } catch (e) {
-    res.status(500).json({ ok: false, mensaje: 'No se pudo enviar la prueba.', detalle: e.message });
+    res.status(500).json({ ok: false, mensaje: 'No se pudo enviar la prueba.', detalle: detalleError(e) });
   }
 });
 
@@ -1276,6 +1277,19 @@ app.get('/', (_req, res) => {
 
 app.use((req, res) => {
   res.status(404).json({ ok: false, mensaje: `Ruta no encontrada: ${req.method} ${req.originalUrl}` });
+});
+
+// Errores que Express no atrapa: un JSON mal formado o demasiado grande llega aqui.
+// Sin este manejador la respuesta seria una pagina HTML con la pila de errores.
+app.use((err, _req, res, _next) => {
+  if (err && err.type === 'entity.parse.failed') {
+    return res.status(400).json({ ok: false, mensaje: 'El cuerpo de la peticion no es un JSON valido.' });
+  }
+  if (err && err.type === 'entity.too.large') {
+    return res.status(413).json({ ok: false, mensaje: 'El cuerpo de la peticion es demasiado grande.' });
+  }
+  detalleError(err);
+  return res.status(500).json({ ok: false, mensaje: 'Error interno del servidor.' });
 });
 
 /*

@@ -189,7 +189,7 @@ export function alertar(motivo) {
   if (!parpadeoTitulo) {
     let alterno = false;
     parpadeoTitulo = setInterval(() => {
-      document.title = alterno ? TITULO_ORIGINAL : '🚨 ALARMA ACTIVA';
+      document.title = alterno ? TITULO_ORIGINAL : 'ALARMA ACTIVA';
       alterno = !alterno;
     }, 800);
   }

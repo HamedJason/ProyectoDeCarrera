@@ -9,7 +9,7 @@ self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 self.addEventListener('push', (evento) => {
   let datos = {};
   try { datos = evento.data ? evento.data.json() : {}; } catch (e) { datos = { cuerpo: evento.data ? evento.data.text() : '' }; }
-  const titulo = datos.titulo || 'Seguridad residencial';
+  const titulo = datos.titulo || 'Sentinel Home';
   const opciones = {
     body: datos.cuerpo || '',
     icon: 'icono.png',

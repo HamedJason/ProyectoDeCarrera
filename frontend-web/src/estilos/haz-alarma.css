@@ -1,0 +1,51 @@
+/* =========================================================
+   Haz de alarma. Dos luces rojas opuestas que giran sobre toda la
+   pantalla, como la torreta de una patrulla. Es solo una capa visual:
+   deja pasar los toques y la intensidad es baja para que el texto
+   debajo conserve su contraste.
+   ========================================================= */
+.haz-alarma {
+  position: fixed; inset: 0; z-index: 40; pointer-events: none; overflow: hidden;
+  animation: haz-entra .5s ease-out;
+}
+.haz-giro {
+  position: absolute; left: 50%; top: 50%;
+  width: 240vmax; height: 240vmax; margin: -120vmax 0 0 -120vmax;
+  background: conic-gradient(from 0deg,
+    rgba(210, 47, 39, 0) 0deg,
+    rgba(210, 47, 39, .22) 18deg,
+    rgba(210, 47, 39, 0) 46deg,
+    rgba(210, 47, 39, 0) 180deg,
+    rgba(210, 47, 39, .22) 198deg,
+    rgba(210, 47, 39, 0) 226deg);
+  animation: haz-gira 2.2s linear infinite;
+}
+.haz-borde {
+  position: absolute; inset: 0;
+  box-shadow: inset 0 0 90px 10px rgba(210, 47, 39, .3);
+  animation: haz-pulso 1.1s ease-in-out infinite alternate;
+}
+:root[data-tema="oscuro"] .haz-giro {
+  background: conic-gradient(from 0deg,
+    rgba(229, 118, 109, 0) 0deg,
+    rgba(229, 118, 109, .26) 18deg,
+    rgba(229, 118, 109, 0) 46deg,
+    rgba(229, 118, 109, 0) 180deg,
+    rgba(229, 118, 109, .26) 198deg,
+    rgba(229, 118, 109, 0) 226deg);
+}
+:root[data-tema="oscuro"] .haz-borde { box-shadow: inset 0 0 90px 10px rgba(229, 118, 109, .32); }
+@keyframes haz-gira { to { transform: rotate(360deg); } }
+@keyframes haz-pulso { from { opacity: .45; } to { opacity: 1; } }
+@keyframes haz-entra { from { opacity: 0; } to { opacity: 1; } }
+
+/* Sin movimiento: queda un marco rojo fijo, que sigue avisando sin girar */
+:root[data-movimiento="reducido"] .haz-giro { display: none; }
+:root[data-movimiento="reducido"] .haz-borde { animation: none; opacity: .9; }
+@media (prefers-reduced-motion: reduce) {
+  .haz-giro { display: none; }
+  .haz-borde { animation: none; opacity: .9; }
+}
+
+.haz-leave-active { transition: opacity .5s ease-in; animation: none; }
+.haz-leave-to { opacity: 0; }
