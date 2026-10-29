@@ -19,8 +19,9 @@
 // PULLUP_EXTERNO = true baja a ~3 uA.
 //
 // Conexiones (los pines se cambian abajo):
-//   MC-38: un cable al GPIO 4 (y otro al 3) y el otro a GND, con pull-up interno
-//   AM312: VCC a 3V3 (o 5V), GND a GND, VOUT al GPIO 5
+//   MC-38: un cable al GPIO 4 y el otro a GND, con pull-up interno
+//   AM312: VCC a 3V3 (o 5V), GND a GND, VOUT al GPIO 4
+//   El GPIO 4 es el unico pin de sensor: se conecta el MC-38 o el AM312, segun USA_CONTACTOS / USA_PIR.
 // Evitar en el C3 los pines 2, 8 y 9 (arranque) y 18 y 19 (USB).
 
 #include <WiFi.h>
@@ -51,19 +52,18 @@ struct ContactoCfg {
 };
 const ContactoCfg CONTACTOS[] = {
   { 4, "" },
-  { 3, "" },
 };
 const int NUM_CONTACTOS = sizeof(CONTACTOS) / sizeof(CONTACTOS[0]);
 const int MAX_CONTACTOS = 6;
 
-// Cada C3 lleva un solo sensor. Deja en true solo el que tenga; el nodo magnetico
+// Cada C3 lleva un solo sensor y comparte el GPIO 4. Deja en true solo el que tenga; el nodo magnetico
 // no necesita saber si la casa esta armada y por eso hace un latido mas espaciado.
-// (Para pruebas se pueden activar los dos.)
 const bool USA_PIR = true;
-const bool USA_CONTACTOS = true;
+const bool USA_CONTACTOS = false;
+static_assert(!(USA_PIR && USA_CONTACTOS), "El PIR y el contacto comparten el GPIO 4: activa solo uno");
 const int NUM_ACTIVOS = USA_CONTACTOS ? NUM_CONTACTOS : 0;
 
-const int PIN_PIR = 5;    // salida del AM312, activa en alto
+const int PIN_PIR = 4;    // salida del AM312, activa en alto (el mismo pin del contacto)
 const int PIN_LED = -1;   // LED de enlace opcional (-1 si no hay)
 
 const bool USAR_SUENO = true;
@@ -665,7 +665,8 @@ void setup() {
   }
   // Entrada simple para el AM312: su salida es debil y un pull-down interno
   // la dejaria en un nivel intermedio
-  pinMode(PIN_PIR, USA_PIR ? INPUT : INPUT_PULLDOWN);   // sin PIR, evita una entrada flotante
+  if (USA_PIR) pinMode(PIN_PIR, INPUT);
+  else if (!USA_CONTACTOS) pinMode(PIN_PIR, INPUT_PULLDOWN);   // sin sensor, evita una entrada flotante
   if (PIN_LED >= 0) pinMode(PIN_LED, OUTPUT);
 
   for (int i = 0; i < NUM_ACTIVOS && i < MAX_CONTACTOS; i++) {
@@ -698,7 +699,7 @@ void setup() {
     Serial.print(" Contacto "); Serial.print(contactoId[i]);
     Serial.print(": GPIO "); Serial.println(CONTACTOS[i].pin);
   }
-  Serial.print(" PIR "); Serial.print(ID_PIR); Serial.print(": GPIO "); Serial.println(PIN_PIR);
+  if (USA_PIR) { Serial.print(" PIR "); Serial.print(ID_PIR); Serial.print(": GPIO "); Serial.println(PIN_PIR); }
   Serial.println("==========================================");
 
   if (!iniciarEspNow()) {
