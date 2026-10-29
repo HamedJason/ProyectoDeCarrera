@@ -1,35 +1,20 @@
-/*
- * Motor de estados de los eventos ONVIF (personas y movimiento).
- *
- * Es logica pura: no abre conexiones, no usa base de datos ni temporizadores.
- * Recibe mensajes ya interpretados y el instante en que llegaron, y avisa por
- * funciones (callbacks) de tres cosas distintas:
- *
- *   alEvento       cada transicion REAL (false -> true o true -> false)
- *   alAlerta       cuando una subida merece avisar al residente
- *   alDiagnostico  todo lo que se descarta o se espera, para poder explicarlo
- *
- * Por que no se mira PropertyOperation:
- *   La MC210 manda siempre PropertyOperation="Initialized", aunque el valor
- *   cambie. Lo unico fiable es el valor (IsPeople / IsMotion), asi que aqui se
- *   comparan valores sucesivos de cada clave e ignora la operacion.
- *
- * Reglas (las numeradas vienen del requisito):
- *   - El estado es independiente por camara, detector y fuente/regla (6).
- *   - El primer mensaje de cada clave tras conectar o reconectar es una
- *     sincronizacion: se guarda, no genera evento ni alerta (7).
- *   - Solo cuenta un cambio de valor; un mensaje repetido se ignora (8, 9).
- *   - Entre alertas del mismo tipo hay un tiempo minimo, el cooldown (10).
- *   - Al perder la conexion el estado pasa a "desconocido", no a "sin personas" (11).
- *   - Una persona produce tambien IsMotion=true: solo se avisa una vez (12).
- *
- * Una precision sobre (7): solo se trata como sincronizacion el primer mensaje
- * que llega dentro de una ventana corta tras suscribirse (ventanaSyncMs). Si la
- * camara no manda estado inicial y la primera noticia de una clave llega mucho
- * despues con valor true, es una persona que acaba de entrar, y silenciarla
- * seria perder la alerta. Fuera de la ventana, un primer valor true cuenta como
- * subida; un primer valor false solo se anota.
- */
+// Motor de estados de los eventos ONVIF (personas y movimiento). Logica pura: sin conexiones, base de
+// datos ni temporizadores. Recibe mensajes ya interpretados y avisa por callbacks:
+//   alEvento (cada transicion real), alAlerta (una subida que merece avisar al residente),
+//   alDiagnostico (todo lo que se descarta o se espera).
+//
+// No se mira PropertyOperation: la MC210 manda siempre "Initialized" aunque el valor cambie, asi que se
+// comparan valores sucesivos de cada clave (IsPeople / IsMotion).
+//
+// Reglas:
+//   - El estado es independiente por camara, detector y fuente/regla.
+//   - El primer mensaje de cada clave tras conectar es sincronizacion (se guarda, sin evento ni alerta),
+//     pero solo dentro de una ventana corta tras suscribirse (ventanaSyncMs). Fuera de ella, un primer
+//     true es una persona que acaba de entrar y cuenta como subida; un primer false solo se anota.
+//   - Solo cuenta un cambio de valor; un mensaje repetido se ignora.
+//   - Entre alertas del mismo tipo hay un tiempo minimo, el cooldown.
+//   - Al perder la conexion el estado pasa a "desconocido", no a "sin personas".
+//   - Una persona produce tambien IsMotion=true: solo se avisa una vez.
 
 const DETECTORES = ['persona', 'movimiento'];
 
@@ -71,7 +56,6 @@ class MotorEventos {
     return c;
   }
 
-  /** Empieza una suscripcion nueva (primera vez o reconexion). */
   conectar(camaraId, ahoraMs) {
     const c = this._cam(camaraId);
     c.conectado = true;
@@ -91,12 +75,8 @@ class MotorEventos {
     if (eraConectado) this.alDiagnostico({ tipo: 'desconectado', camaraId });
   }
 
-  /**
-   * Procesa un mensaje.
-   * @param {string} camaraId
-   * @param {object} m  { detector:'persona'|'movimiento', valor:boolean, topic, utc, operacion, fuente, regla }
-   * @param {number} ahoraMs  instante de llegada (el reloj del servidor, no el de la camara)
-   */
+  // m: { detector:'persona'|'movimiento', valor:boolean, topic, utc, operacion, fuente, regla }
+  // ahoraMs: instante de llegada (reloj del servidor, no el de la camara).
   procesar(camaraId, m, ahoraMs) {
     const c = this._cam(camaraId);
     if (!DETECTORES.includes(m.detector) || typeof m.valor !== 'boolean') {
@@ -153,7 +133,6 @@ class MotorEventos {
       return;
     }
 
-    // Movimiento
     if (this._personaPresente(c) || ahoraMs - c.ultAlerta.persona < this.cooldownPersonaMs) {
       this.alDiagnostico({ tipo: 'movimiento_cubierto_por_persona', camaraId });
       return;
@@ -192,10 +171,7 @@ class MotorEventos {
     return false;
   }
 
-  /**
-   * Estado actual de una camara. Un detector es null (desconocido) si no hay
-   * conexion o si todavia no se ha recibido ningun valor suyo.
-   */
+  // Un detector es null (desconocido) si no hay conexion o aun no llego ningun valor suyo.
   estado(camaraId) {
     const c = this.camaras.get(camaraId);
     if (!c || !c.conectado) return { conectado: false, persona: null, movimiento: null };

@@ -1,4 +1,3 @@
-<!-- Panel lateral: cuenta, vivienda, apariencia y cierre de sesion -->
 <script setup>
 import { computed } from 'vue';
 import Hoja from './Hoja.vue';

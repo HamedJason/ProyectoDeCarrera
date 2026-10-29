@@ -1,7 +1,4 @@
-<!--
-  Tarjeta de un sensor (puerta, ventana o movimiento). Solo cambian clases y
-  textos, asi las animaciones no se reinician en cada consulta.
--->
+<!-- Solo cambian clases y textos, asi las animaciones no se reinician en cada consulta. -->
 <script setup>
 import { computed } from 'vue';
 import IlustracionSensor from './IlustracionSensor.vue';

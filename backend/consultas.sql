@@ -1,6 +1,4 @@
--- Consultas de la prueba de concepto
--- Estas son las consultas que utiliza el backend y las que sirven como
--- evidencia de recuperacion de informacion para el taller.
+-- Consultas que usa el backend y que sirven como evidencia de recuperacion de informacion.
 
 -- 1) Consulta principal: recuperar las mediciones mas recientes de una vivienda.
 --    Es la que responde GET /mediciones y la que alimenta la lista del frontend.

@@ -1,4 +1,3 @@
-<!-- Alta y edicion de un sensor -->
 <script setup>
 import { reactive, ref, computed, watch, nextTick } from 'vue';
 import Hoja from './Hoja.vue';

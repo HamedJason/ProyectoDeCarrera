@@ -1,4 +1,3 @@
-<!-- Pantalla principal de la vivienda: estado, sensores, sirena, camara, ajustes e historial -->
 <script setup>
 import { computed } from 'vue';
 import BarraSuperior from './BarraSuperior.vue';

@@ -1,14 +1,5 @@
-/*
- * Sentinel Home. Identidad visual.
- * Cada sensor es una tarjeta con su propia ilustracion animada: las puertas y
- * ventanas se ven de frente y se abren cuando el contacto magnetico se separa,
- * el detector de movimiento emite ondas al detectar y la sirena gira su haz.
- * El color tiene un solo significado por tono: pino para armado, ambar para
- * actividad y rojo unicamente para una alarma.
- *
- * La tipografia (Bricolage Grotesque, licencia OFL) se sirve desde el propio
- * backend para que funcione sin Internet y sobre HTTP.
- */
+/* Sentinel Home. El color tiene un solo significado por tono: pino para armado, ambar para actividad y rojo solo para una alarma.
+   La tipografia (Bricolage Grotesque, licencia OFL) se sirve desde el propio backend para funcionar sin Internet y sobre HTTP. */
 @font-face {
   font-family: "Bricolage";
   src: url("/fuentes/bricolage-latin.woff2") format("woff2-variations");
@@ -19,7 +10,7 @@
 }
 
 :root {
-  /* Modo claro. Cada color tiene un solo significado: pino = armado, ambar = actividad, sirena = alarma. */
+  /* Modo claro */
   --yeso: #E6EBE7;
   --papel: #F6F8F5;
   --campo: #FFFFFF;

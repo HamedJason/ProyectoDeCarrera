@@ -1,49 +1,27 @@
-/*
- * Proyecto de Carrera - Sistema escalable de seguridad residencial
- * Nodo periferico sobre ESP32-C3
- *
- * No se conecta a Internet. Lee sus sensores y manda cada evento por ESP-NOW
- * al concentrador (nodo_sensor.ino), que decide si suena la alarma y avisa al
- * backend.
- *
- *   [MC-38 + AM312] -> ESP32-C3 --ESP-NOW--> concentrador --Wi-Fi--> backend
- *
- * EMPAREJAMIENTO AUTOMATICO
- *   No hay MAC ni canal escritos en el codigo. La primera vez, el C3 busca al
- *   concentrador en los canales 1 a 13 y le pide enlazarse; el concentrador
- *   responde si tiene abierto el comando "emparejar". El C3 guarda la MAC del
- *   concentrador en su flash y ya no vuelve a necesitarlo.
- *   Despues de un reinicio solo vuelve a buscar el canal (el del router).
- *
- * Comandos por el Monitor Serie (115200, "Nueva linea"): ver, olvidar,
- * reiniciar, ayuda.
- *
- * Si el concentrador esta apagado, los eventos esperan en una cola pequena.
- *
- * AHORRO DE BATERIA (USAR_SUENO)
- *   El nodo pasa casi todo el tiempo en suspension ligera, con la radio apagada
- *   (~0.2 mA en vez de ~60 mA). Lo despierta:
- *     - un cambio del contacto magnetico (puerta abierta o cerrada): se envia al
- *       instante, asi que el contacto siempre queda activo y reporta cada cambio;
- *     - el movimiento del PIR, pero solo si la casa esta armada;
- *     - un temporizador (INTERVALO_LATIDO_MS) para el latido y para preguntar si
- *       la casa sigue armada.
- *   El concentrador contesta a cada transmision con el estado de armado (tipo
- *   TIPO_ARMADO). Si el nodo aun no lo sabe, asume "armado" (lo seguro).
- *   Con la casa desarmada el PIR no despierta al nodo. El cambio de armado llega
- *   al nodo en el siguiente latido (hasta INTERVALO_LATIDO_MS).
- *   Para depurar con el Monitor Serie sin dormir, pon USAR_SUENO en false.
- *
- *   Para que el contacto gaste menos: con el pull-up interno (~45 kohm) circulan
- *   ~70 uA por contacto mientras la puerta esta cerrada. Pon una resistencia
- *   externa de 1 Mohm a 3V3 en cada contacto y cambia PULLUP_EXTERNO a true
- *   (baja a ~3 uA).
- *
- * Conexiones (los pines se cambian abajo):
- *   MC-38:  un cable al GPIO 4 (y otro al 3) y el otro a GND, con pull-up interno
- *   AM312:  VCC a 3V3 (o 5V), GND a GND, VOUT al GPIO 5
- * Evitar en el C3 los pines 2, 8 y 9 (arranque) y 18 y 19 (USB).
- */
+// Nodo periferico sobre ESP32-C3. No se conecta a Internet: lee sus sensores y manda cada evento por ESP-NOW
+// al concentrador (nodo_sensor.ino), que decide si suena la alarma y avisa al backend.
+//   [MC-38 + AM312] -> ESP32-C3 --ESP-NOW--> concentrador --Wi-Fi--> backend
+//
+// Emparejamiento automatico: no hay MAC ni canal en el codigo. La primera vez el C3 busca al concentrador en los
+// canales 1 a 13 y le pide enlazarse; este responde si tiene abierto el comando "emparejar". El C3 guarda la MAC
+// del concentrador en flash y, tras un reinicio, solo vuelve a buscar el canal (el del router).
+// Si el concentrador esta apagado, los eventos esperan en una cola pequena.
+//
+// Comandos por el Monitor Serie (115200, "Nueva linea"): ver, olvidar, reiniciar, ayuda, llave.
+//
+// Ahorro de bateria (USAR_SUENO): el nodo pasa casi todo el tiempo en suspension ligera con la radio apagada
+// (~0.2 mA en vez de ~60 mA). Lo despiertan un cambio del contacto magnetico (se envia al instante), el
+// movimiento del PIR (solo con la casa armada) y un temporizador (INTERVALO_LATIDO_MS) para el latido y para
+// preguntar si la casa sigue armada. El concentrador contesta cada transmision con el estado de armado
+// (TIPO_ARMADO); mientras el nodo no lo sabe, asume "armado". Con la casa desarmada el PIR no despierta al
+// nodo y el cambio llega en el siguiente latido. Para depurar sin dormir, USAR_SUENO = false.
+// El pull-up interno (~45 kohm) gasta ~70 uA por contacto cerrado; con 1 Mohm externo a 3V3 y
+// PULLUP_EXTERNO = true baja a ~3 uA.
+//
+// Conexiones (los pines se cambian abajo):
+//   MC-38: un cable al GPIO 4 (y otro al 3) y el otro a GND, con pull-up interno
+//   AM312: VCC a 3V3 (o 5V), GND a GND, VOUT al GPIO 5
+// Evitar en el C3 los pines 2, 8 y 9 (arranque) y 18 y 19 (USB).
 
 #include <WiFi.h>
 #include <Preferences.h>
@@ -59,8 +37,6 @@
 #else
 #include <esp_system.h>
 #endif
-
-// ===================== Configuracion =====================
 
 // Para conservar los identificadores de un nodo ya registrado con el firmware
 // anterior. Si no, dejalos vacios y el nodo se llama c3-xxxxxx con su MAC.
@@ -90,14 +66,11 @@ const int NUM_ACTIVOS = USA_CONTACTOS ? NUM_CONTACTOS : 0;
 const int PIN_PIR = 5;    // salida del AM312, activa en alto
 const int PIN_LED = -1;   // LED de enlace opcional (-1 si no hay)
 
-// Ahorro de energia (ver arriba)
 const bool USAR_SUENO = true;
 
-// Modo de medicion: pensado para probar con el cable USB conectado. No duerme
-// (el USB se caeria al dormir): en lugar de eso espera despierto y, en cada sesion
-// de radio, imprime cuanto duro encenderla, transmitir y apagarla, y con eso
-// estima el consumo promedio. Las corrientes de abajo son tipicas del ESP32-C3;
-// sustituyelas por las que midas con un multimetro (I_DORMIDO_MA) o un medidor.
+// Modo de medicion (para probar con el USB conectado): no duerme y, en cada sesion de radio, imprime cuanto duro
+// encenderla, transmitir y apagarla para estimar el consumo promedio. Las corrientes son tipicas del ESP32-C3;
+// sustituyelas por las que midas.
 const bool MODO_MEDICION = false;
 const float I_ACTIVO_MA = 70.0;    // radio encendida y transmitiendo
 const float I_DORMIDO_MA = 0.17;   // suspension ligera
@@ -107,8 +80,6 @@ const bool PULLUP_EXTERNO = false;   // true si cada contacto lleva 1 Mohm a 3V3
 // esta en el codigo: se carga por consola con el comando llave y vive en la
 // flash. Si no hay llave guardada, el nodo funciona sin cifrar y lo avisa.
 const bool USAR_CIFRADO = true;
-
-// ===================== Parametros =====================
 
 const unsigned long DEBOUNCE_MS = 50;
 const unsigned long BLOQUEO_PIR_MS = 8000;
@@ -129,8 +100,7 @@ const int  REINTENTOS_ENVIO = 3;
 const int  FALLOS_PARA_REBUSCAR = 3;
 const unsigned long INTERVALO_BUSQUEDA_MS = 2000;
 
-// ===================== Protocolo =====================
-// Igual que en nodo_sensor.ino
+// Protocolo: igual que en nodo_sensor.ino
 
 const uint8_t TIPO_EVENTO    = 1;
 const uint8_t TIPO_ESTADO    = 2;
@@ -154,8 +124,6 @@ struct __attribute__((packed)) PaqueteSensor {
 
 const uint8_t MAC_BROADCAST[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
-// ===================== Estado interno =====================
-
 char NODO_ID[16];
 char ID_PIR[24];
 char contactoId[MAX_CONTACTOS][24];
@@ -172,11 +140,8 @@ unsigned long tUltimoPir = 0;
 
 Preferences prefs;
 
-// ===================== Seguridad =====================
-// Una sola llave de 16 bytes por instalacion, guardada en la flash y nunca en el
-// codigo. De ella salen la PMK, la LMK de cada nodo y la llave de las firmas.
-// Cada paquete lleva una firma HMAC-SHA256 recortada a 8 bytes. Sin llave el
-// sistema sigue funcionando sin cifrar (solo para pruebas) y lo avisa.
+// Una sola llave de 16 bytes por instalacion, en flash y nunca en el codigo: de ella salen la PMK, la LMK de cada
+// nodo y la llave de las firmas (HMAC-SHA256 recortada a 8 bytes). Sin llave funciona sin cifrar y lo avisa.
 const size_t LARGO_TAG = 8;
 uint8_t llaveMaestra[16];
 uint8_t pmkDerivada[16];
@@ -250,7 +215,6 @@ int nibbleHex(char c) {
   return -1;
 }
 
-// Guarda una llave escrita como 32 digitos hexadecimales
 bool guardarLlaveHex(const String& hex) {
   if (hex.length() != 32) return false;
   uint8_t k[16];
@@ -280,7 +244,6 @@ unsigned long tUltimoLatido = 0;
 bool registroPirEnviado = false;
 int  rondasEmparejar = 0;
 
-// Ahorro de energia
 bool armado = true;                 // hasta que el concentrador diga lo contrario, se vigila
 volatile bool armadoRecibido = false;
 volatile int8_t armadoValor = 1;
@@ -289,7 +252,6 @@ int  canalHub = 0;                  // canal en el que se encontro al concentrad
 unsigned long intervaloBusqueda = INTERVALO_BUSQUEDA_MS;
 bool hubo_envio = false;            // hubo envios en este ciclo y falta oir la respuesta
 
-// Modo de medicion
 unsigned long tRadioInicio = 0;
 unsigned long msRadioListo = 0;
 unsigned long sesionesMedidas = 0;
@@ -340,8 +302,6 @@ void armarIdentificadores() {
   }
 }
 
-// ===================== ESP-NOW =====================
-
 // La firma de las funciones de callback cambio con la version del core de ESP32
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)
 void alEnviar(const esp_now_send_info_t*, esp_now_send_status_t estado) {
@@ -388,7 +348,6 @@ void alRecibir(const uint8_t* mac, const uint8_t* datos, int largo) {
 }
 #endif
 
-// Registra al concentrador como destino de los envios
 bool registrarHub() {
   if (esp_now_is_peer_exist(hubMac)) esp_now_del_peer(hubMac);
   esp_now_peer_info_t par = {};
@@ -505,8 +464,6 @@ bool buscarEmparejamiento() {
   return false;
 }
 
-// ===================== Radio y suspension =====================
-
 bool radioEncender() {
   if (radioActiva) return true;
   tRadioInicio = millis();
@@ -587,8 +544,6 @@ void guardarHub() {
   Serial.println(macATexto(hubMac));
 }
 
-// ===================== Cola de envio =====================
-
 void encolar(const PaqueteSensor &p) {
   if (colaTam >= CAP_COLA) {
     // Llena: se descarta el mas antiguo para conservar lo reciente
@@ -627,8 +582,6 @@ void vaciarCola() {
     colaTam--;
   }
 }
-
-// ===================== Consola serie =====================
 
 void mostrarEstado() {
   Serial.println("---------- Estado ----------");
@@ -701,8 +654,6 @@ void indicarLed(bool encendido) {
   if (PIN_LED >= 0) digitalWrite(PIN_LED, encendido ? HIGH : LOW);
 }
 
-// ===================== setup / loop =====================
-
 void setup() {
   // 80 MHz basta para ESP-NOW y gasta menos que los 160 MHz por defecto
   if (USAR_SUENO) setCpuFrequencyMhz(80);
@@ -731,9 +682,8 @@ void setup() {
     hubGuardado = true;
   }
 
-  // La secuencia nunca retrocede entre reinicios: los 12 bits altos son un
-  // contador de arranques guardado en flash. Asi el concentrador puede descartar
-  // cualquier paquete con secuencia menor (anti-replay) sin rechazar al nodo.
+  // La secuencia nunca retrocede entre reinicios: sus 12 bits altos son un contador de arranques guardado en flash,
+  // asi el concentrador descarta secuencias menores (anti-replay) sin rechazar al nodo.
   uint32_t arranques = prefs.getUInt("arranques", 0) + 1;
   prefs.putUInt("arranques", arranques);
   secuencia = (arranques & 0xFFF) << 20;
@@ -792,7 +742,6 @@ void loop() {
     }
   }
 
-  // Sensor de movimiento
   if (!USA_PIR) {
     // este nodo no lleva PIR
   } else if (!pirListo) {
@@ -837,7 +786,6 @@ void loop() {
   }
   aplicarArmado();
 
-  // Enlace con el concentrador
   if (radioActiva && tocaBuscar) {
     tUltimaBusqueda = ahora;
     if (!hubGuardado) {
@@ -874,7 +822,6 @@ void loop() {
   if (radioActiva) vaciarCola();
   esperarArmado();
 
-  // ---- Suspension ----
   if (!USAR_SUENO || !hubGuardado || ahora < VENTANA_CONSOLA_MS) {
     indicarLed(enlazado);
     delay(5);

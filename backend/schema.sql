@@ -1,13 +1,8 @@
--- Proyecto de Carrera - Sistema escalable de seguridad residencial
--- Estructura de la base de datos
---
--- Los campos vivienda_id, zona, nodo_id y sensor_id se conservan como texto
--- para no adelantar el diseno relacional definitivo, pero manteniendo desde
--- ahora la jerarquia que caracteriza al proyecto.
+-- Esquema de la base de datos de Sentinel Home.
+-- vivienda_id, zona, nodo_id y sensor_id son texto para no adelantar el diseno relacional
+-- definitivo, pero conservan desde ahora la jerarquia del proyecto.
 
--- ============================================================
 -- Eventos registrados por los sensores
--- ============================================================
 CREATE TABLE IF NOT EXISTS mediciones (
     id               SERIAL PRIMARY KEY,
     vivienda_id      TEXT        NOT NULL,
@@ -21,46 +16,31 @@ CREATE TABLE IF NOT EXISTS mediciones (
     creado_en        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Indice para la consulta mas frecuente del frontend, que pide las mediciones
--- mas recientes de una vivienda.
+-- Indice para la consulta mas frecuente del frontend: las mediciones mas recientes de una vivienda.
 CREATE INDEX IF NOT EXISTS idx_mediciones_vivienda_fecha
     ON mediciones (vivienda_id, creado_en DESC);
 
--- ============================================================
--- Estado de armado de cada vivienda (RF-11 y RF-13)
--- ============================================================
--- Se persiste en la base de datos y no en memoria, para que el estado
--- sobreviva a un reinicio del servicio. Si el concentrador se reinicia,
--- recupera de aqui si la vivienda quedo armada.
+-- Estado de armado de cada vivienda (RF-11 y RF-13). Se guarda en la base para sobrevivir a un
+-- reinicio del servicio; el concentrador recupera de aqui si quedo armada.
 CREATE TABLE IF NOT EXISTS estado_vivienda (
     vivienda_id      TEXT        PRIMARY KEY,
     armado           BOOLEAN     NOT NULL DEFAULT FALSE,
     modo_silencioso  BOOLEAN     NOT NULL DEFAULT FALSE,
-    -- Activacion manual de la salida audible, independiente del armado.
-    -- Sirve para probar la sirena sin tener que generar un evento real.
+    -- Activacion manual de la salida audible, independiente del armado; sirve para probar la sirena.
     actuador_activo  BOOLEAN     NOT NULL DEFAULT FALSE,
     actualizado_en   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Indica que hay una alarma sonando en este momento. La activa el nodo cuando
--- un sensor dispara con el sistema armado, y la apaga la aplicacion, el
--- desarmado o el fin del tiempo de sirena.
--- Se agrega con ALTER para que una base creada antes de este cambio (por
--- ejemplo la de la VPS) se actualice sin perder datos.
+-- Hay una alarma sonando: la activa el nodo cuando un sensor dispara con el sistema armado y la apaga la
+-- aplicacion, el desarmado o el fin del tiempo de sirena. Se agrega con ALTER para actualizar bases ya creadas.
 ALTER TABLE estado_vivienda
     ADD COLUMN IF NOT EXISTS alarma_activa BOOLEAN NOT NULL DEFAULT FALSE;
 
--- Texto que explica por que suena la alarma, por ejemplo "Puerta abierta en
--- entrada". Se muestra en la aplicacion y se envia en la notificacion.
+-- Motivo por el que suena la alarma (por ejemplo "Puerta abierta en entrada"); se muestra en la app y en la notificacion.
 ALTER TABLE estado_vivienda
     ADD COLUMN IF NOT EXISTS alarma_motivo TEXT;
 
--- ============================================================
--- Bitacora de acciones del usuario (RNF-11, trazabilidad)
--- ============================================================
--- Conserva quien realizo cada accion sobre el sistema y en que momento.
--- El campo usuario es texto porque la gestion de cuentas se define en un
--- taller posterior. Mientras tanto identifica el origen de la accion.
+-- Bitacora de acciones del usuario (RNF-11): quien hizo cada cambio y cuando.
 CREATE TABLE IF NOT EXISTS acciones (
     id             SERIAL PRIMARY KEY,
     vivienda_id    TEXT        NOT NULL,
@@ -74,12 +54,8 @@ CREATE TABLE IF NOT EXISTS acciones (
 CREATE INDEX IF NOT EXISTS idx_acciones_vivienda_fecha
     ON acciones (vivienda_id, creado_en DESC);
 
--- ============================================================
--- Registro de sensores de cada vivienda
--- ============================================================
--- Permite tener muchas puertas, ventanas y detectores de movimiento. El nodo
--- solo reporta contacto (estado_puerta) o movimiento; el residente decide en
--- la aplicacion si un contacto es una puerta o una ventana.
+-- Registro de sensores de cada vivienda. El nodo solo reporta contacto (estado_puerta) o movimiento;
+-- el residente decide en la aplicacion si un contacto es puerta o ventana.
 CREATE TABLE IF NOT EXISTS sensores (
     id           SERIAL PRIMARY KEY,
     vivienda_id  TEXT        NOT NULL,
@@ -96,18 +72,13 @@ CREATE TABLE IF NOT EXISTS sensores (
 ALTER TABLE estado_vivienda
     ADD COLUMN IF NOT EXISTS alarma_sensor TEXT;
 
--- ============================================================
--- Notificaciones push (Web Push)
--- ============================================================
--- Claves VAPID del servidor. Se generan una sola vez al primer arranque y se
--- conservan aqui para que las suscripciones existentes no se invaliden.
+-- Notificaciones push (Web Push). Claves VAPID del servidor: se generan una vez y se conservan para no invalidar las suscripciones.
 CREATE TABLE IF NOT EXISTS ajustes_servidor (
     clave TEXT PRIMARY KEY,
     valor TEXT NOT NULL
 );
 
--- Dispositivos que aceptaron recibir avisos. Cada navegador tiene un endpoint
--- unico que entrega el servicio de push de su plataforma (Apple, Google, etc.).
+-- Dispositivos que aceptaron avisos; cada navegador tiene un endpoint unico que entrega el servicio de push de su plataforma.
 CREATE TABLE IF NOT EXISTS suscripciones_push (
     id          SERIAL PRIMARY KEY,
     vivienda_id TEXT        NOT NULL,
@@ -118,13 +89,7 @@ CREATE TABLE IF NOT EXISTS suscripciones_push (
     creado_en   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- ============================================================
--- Cuentas, sesiones y viviendas (inicio de sesion y multivivienda)
--- ============================================================
--- Hasta ahora vivienda_id era solo un texto que cualquiera podia consultar.
--- Con estas tablas cada vivienda tiene duenos y miembros, y la aplicacion exige
--- una sesion para ver o cambiar sus datos. Las demas tablas siguen usando
--- vivienda_id como texto, por lo que los datos existentes se conservan.
+-- Cuentas, sesiones y viviendas. Las demas tablas siguen usando vivienda_id como texto, asi que los datos existentes se conservan.
 CREATE TABLE IF NOT EXISTS usuarios (
     id            SERIAL PRIMARY KEY,
     email         TEXT        NOT NULL,
@@ -135,8 +100,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS usuarios_email_idx ON usuarios (LOWER(email));
 
--- Solo se guarda el resumen (SHA-256) del identificador de sesion. Si alguien
--- obtuviera la base de datos no podria usar las sesiones activas.
+-- Solo se guarda el resumen (SHA-256) del id de sesion: con la base filtrada no se podrian usar las sesiones activas.
 CREATE TABLE IF NOT EXISTS sesiones (
     id_hash    TEXT        PRIMARY KEY,
     usuario_id INTEGER     NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
@@ -165,8 +129,7 @@ CREATE TABLE IF NOT EXISTS miembros (
     PRIMARY KEY (vivienda_id, usuario_id)
 );
 
--- Codigos de un solo uso para que otra persona se una a una vivienda, o cree su
--- cuenta cuando el registro abierto esta desactivado.
+-- Codigos de un solo uso para unirse a una vivienda o crear cuenta cuando el registro abierto esta desactivado.
 CREATE TABLE IF NOT EXISTS invitaciones (
     codigo      TEXT        PRIMARY KEY,
     vivienda_id TEXT        NOT NULL REFERENCES viviendas(id) ON DELETE CASCADE,
@@ -177,12 +140,8 @@ CREATE TABLE IF NOT EXISTS invitaciones (
     usado_en    TIMESTAMPTZ
 );
 
--- ============================================================
--- Nodos y registro automatico de sensores
--- ============================================================
--- El concentrador reporta cada pocos segundos los nodos que escucha. Asi la
--- aplicacion sabe si un nodo sigue vivo (RF-25) y los sensores nuevos aparecen
--- solos, sin esperar a que alguien abra la puerta.
+-- Nodos y registro automatico de sensores: el concentrador reporta los nodos que escucha, asi la app sabe si
+-- siguen vivos (RF-25) y los sensores nuevos aparecen solos.
 CREATE TABLE IF NOT EXISTS nodos (
     vivienda_id  TEXT        NOT NULL,
     nodo_id      TEXT        NOT NULL,
@@ -198,11 +157,7 @@ CREATE TABLE IF NOT EXISTS nodos (
 ALTER TABLE sensores
     ADD COLUMN IF NOT EXISTS confirmado BOOLEAN NOT NULL DEFAULT TRUE;
 
--- ============================================================
--- Camara (ESP32 con OV5640)
--- ============================================================
--- Las imagenes se guardan como archivos en disco, no en la base de datos, para
--- no inflarla. Aqui solo queda el registro de cada una.
+-- Camara (ESP32 con OV5640). Las imagenes son archivos en disco, no en la base; aqui solo queda el registro de cada una.
 CREATE TABLE IF NOT EXISTS camaras (
     vivienda_id  TEXT        NOT NULL,
     camara_id    TEXT        NOT NULL,
@@ -264,12 +219,8 @@ ALTER TABLE suscripciones_push ADD COLUMN IF NOT EXISTS usuario_id INTEGER;
 ALTER TABLE suscripciones_push DROP CONSTRAINT IF EXISTS suscripciones_push_endpoint_key;
 CREATE UNIQUE INDEX IF NOT EXISTS suscripciones_push_viv_ep ON suscripciones_push (vivienda_id, endpoint);
 
--- ============================================================
--- Eventos de la camara (deteccion de personas y movimiento por ONVIF)
--- ============================================================
--- Cada cambio real de estado queda registrado (subida o bajada). "alerta" indica
--- si ese evento llego a avisar al residente: depende del cooldown, de si el
--- sistema estaba armado y de la politica configurada. Nunca activa la sirena.
+-- Eventos de la camara (personas y movimiento por ONVIF). Cada cambio real queda registrado; "alerta" indica
+-- si llego a avisar al residente (depende del cooldown, del armado y de la politica configurada).
 CREATE TABLE IF NOT EXISTS eventos_camara (
     id          SERIAL PRIMARY KEY,
     vivienda_id TEXT        NOT NULL,

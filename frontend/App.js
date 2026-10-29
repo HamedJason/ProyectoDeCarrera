@@ -1,21 +1,6 @@
-/*
- * Proyecto de Carrera - Sistema escalable de seguridad residencial
- * Taller 5: Prueba de concepto reducida
- *
- * Frontend minimo en React Native (Expo).
- *
- * Se eligio React Native desde la prueba de concepto, en lugar de una pagina
- * web desechable, porque la aplicacion movil es el frontend definitivo del
- * proyecto. De esta forma el codigo escrito en esta etapa se conserva en el
- * prototipo alfa en lugar de rehacerse.
- *
- * Esta pantalla demuestra:
- *   - Comunicacion real con el backend desplegado
- *   - Dato mas reciente con su fecha y hora
- *   - Lista con el historico almacenado
- *   - Estados de carga, ausencia de datos y error de comunicacion
- *   - Envio de un comando al actuador
- */
+// Frontend minimo en React Native (Expo) de la prueba de concepto. Se eligio React Native porque la aplicacion
+// movil es el frontend definitivo: el codigo de esta etapa se conserva en el prototipo alfa.
+// Muestra el dato mas reciente con su fecha, el historico, los estados de carga, vacio y error, y envia un comando al actuador.
 
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -23,15 +8,11 @@ import {
   ActivityIndicator, RefreshControl, Pressable, StatusBar, Platform
 } from 'react-native';
 
-// ===================== Configuracion =====================
-
 // URL del backend desplegado. Debe apuntar al servicio en la nube, no a
 // localhost, porque la aplicacion corre en el telefono y no en la computadora.
 const BACKEND_BASE = 'https://alarma-poc.onrender.com';
 const VIVIENDA_ID = 'casa-001';
 const TIMEOUT_MS = 10000;
-
-// ===================== Utilidades =====================
 
 // fetch con tiempo limite, para poder distinguir una red caida de una espera larga
 async function fetchConTimeout(url, opciones = {}) {
@@ -62,8 +43,6 @@ function interpretarValor(medicion) {
   return `${medicion.valor} ${medicion.unidad || ''}`.trim();
 }
 
-// ===================== Pantalla =====================
-
 export default function App() {
   const [cargando, setCargando] = useState(true);
   const [refrescando, setRefrescando] = useState(false);
@@ -85,15 +64,13 @@ export default function App() {
       const datos = await respuesta.json();
       setMediciones(datos.mediciones || []);
 
-      // Estado actual del actuador
       const rc = await fetchConTimeout(`${BACKEND_BASE}/comando?vivienda_id=${VIVIENDA_ID}`);
       if (rc.ok) {
         const dc = await rc.json();
         setActuadorActivo(Boolean(dc.actuador_activo));
       }
     } catch (e) {
-      // Se distingue el corte por tiempo limite de otros fallos, porque durante
-      // las pruebas de perdida de conexion son situaciones diferentes.
+      // Se distingue el corte por tiempo limite de otros fallos: son situaciones diferentes.
       if (e.name === 'AbortError') {
         setError('No hubo respuesta del servidor. Revisa tu conexion a Internet.');
       } else {
@@ -137,7 +114,7 @@ export default function App() {
 
   const ultima = mediciones.length > 0 ? mediciones[0] : null;
 
-  // ---------- Estado: cargando por primera vez ----------
+  // Cargando por primera vez
   if (cargando) {
     return (
       <SafeAreaView style={[estilos.pantalla, estilos.centrado]}>
@@ -156,7 +133,7 @@ export default function App() {
         <Text style={estilos.subtitulo}>Vivienda {VIVIENDA_ID} · prueba de concepto</Text>
       </View>
 
-      {/* ---------- Estado: error de comunicacion ---------- */}
+      {/* Estado: error de comunicacion */}
       {error && (
         <View style={estilos.banderaError}>
           <Text style={estilos.textoError}>{error}</Text>
@@ -166,7 +143,7 @@ export default function App() {
         </View>
       )}
 
-      {/* ---------- Dato mas reciente ---------- */}
+      {/* Dato mas reciente */}
       <View style={estilos.tarjeta}>
         <Text style={estilos.etiquetaTarjeta}>Último evento registrado</Text>
         <Text style={estilos.valorGrande}>{interpretarValor(ultima)}</Text>
@@ -180,7 +157,7 @@ export default function App() {
         )}
       </View>
 
-      {/* ---------- Control del actuador ---------- */}
+      {/* Control del actuador */}
       <Pressable
         onPress={alternarActuador}
         disabled={enviandoComando}
@@ -193,14 +170,14 @@ export default function App() {
         </Text>
       </Pressable>
 
-      {/* ---------- Historico ---------- */}
+      {/* Historico */}
       <Text style={estilos.tituloLista}>Historial ({mediciones.length})</Text>
 
       <FlatList
         data={mediciones}
         keyExtractor={(item) => String(item.id)}
         refreshControl={<RefreshControl refreshing={refrescando} onRefresh={alRefrescar} />}
-        // ---------- Estado: sin datos ----------
+        // Sin datos
         ListEmptyComponent={
           <View style={estilos.centrado}>
             <Text style={estilos.textoEstado}>
@@ -228,8 +205,6 @@ export default function App() {
     </SafeAreaView>
   );
 }
-
-// ===================== Estilos =====================
 
 const estilos = StyleSheet.create({
   pantalla: {

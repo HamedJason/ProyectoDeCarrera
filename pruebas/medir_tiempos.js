@@ -1,25 +1,11 @@
 #!/usr/bin/env node
-/*
- * Pruebas minimas de la prueba de concepto, listas para pegar en el reporte.
- * Ejecuta contra el servidor desplegado (sin hardware, sin dependencias, Node 18+):
- *
- *   node medir_tiempos.js --url https://sentinelhome.ddns.net --token hv_XXXX \
- *        --email tu@correo.com --clave "tu clave"
- *   (con el token global antiguo agrega: --vivienda casa-001)
- *
- *   Con el servidor en HTTP: --url http://sentinelhome.ddns.net:8080
- *
- * Que hace:
- *   1. Diez transmisiones consecutivas de un contacto (abre/cierra), con codigo
- *      HTTP, latencia de la respuesta e id asignado en la base de datos.
- *   2. Para cada una, el tiempo hasta que el dato esta disponible para el
- *      frontend (se consulta igual que lo hace la aplicacion). Es la medicion
- *      aproximada sensor-frontend SIN el tramo inalambrico del nodo al hub.
- *   3. Una peticion sin token (debe dar 401) y una con datos incorrectos (debe
- *      dar 400 y no registrar nada).
- * Los registros de prueba usan el sensor "prueba-medicion"; se pueden borrar desde la app.
- * Sin --email/--clave se omite la parte 2.
- */
+// Mide tiempos contra el servidor desplegado (sin hardware ni dependencias, Node 18+):
+//   node medir_tiempos.js --url https://sentinelhome.ddns.net --token hv_XXXX --email tu@correo.com --clave "tu clave"
+// (con el token global antiguo agrega --vivienda casa-001; con el servidor en HTTP: --url http://sentinelhome.ddns.net:8080)
+// Hace diez transmisiones consecutivas de un contacto y registra codigo HTTP, latencia e id asignado. Con
+// --email/--clave mide ademas el tiempo hasta que el dato esta disponible para el frontend (aproximado, sin
+// el tramo inalambrico). Termina probando que una peticion sin token da 401 y una con datos incorrectos da 400
+// sin registrar nada. Los registros usan el sensor "prueba-medicion", que se puede borrar desde la app.
 const a = process.argv.slice(2);
 const opt = (n, d) => { const i = a.indexOf('--' + n); return i >= 0 ? a[i + 1] : d; };
 const URL_BASE = opt('url', 'http://localhost:8080').replace(/\/+$/, '');
@@ -53,7 +39,7 @@ async function entrar() {
   const sesion = await entrar();
   let viviendaId = null;   // se toma de la respuesta de la primera medicion (la vivienda de ese token)
 
-  // ---- 1 y 2. Diez transmisiones consecutivas ----
+  // Diez transmisiones consecutivas y su disponibilidad en el frontend
   const filas = [];
   for (let i = 1; i <= 10; i++) {
     const valor = i % 2 ? 1 : 0;
@@ -84,7 +70,7 @@ async function entrar() {
   if (vis.length) console.log(`Hasta estar disponible para el frontend: promedio ${prom(vis)} ms, minimo ${Math.min(...vis)}, maximo ${Math.max(...vis)} (${vis.length} de 10 medidas)`);
   else console.log('Disponibilidad para el frontend: no medida (faltan --email y --clave).');
 
-  // ---- 3. Pruebas de rechazo ----
+  // Rechazos: sin token (401) y con datos incorrectos (400)
   console.log('\n| Prueba | Esperado | Obtenido |');
   console.log('|---|---|---|');
   const sinToken = await pedir('/mediciones', { metodo: 'POST', headers: { 'Content-Type': 'application/json' }, json: { zona: 'prueba', nodo_id: 'prueba-nodo', sensor_id: 'prueba-medicion', variable: 'estado_puerta', valor: 1 } });

@@ -1,23 +1,14 @@
-/*
- * Proyecto de Carrera - Sistema escalable de seguridad residencial
- * Concentrador (ESP32 DevKit)
- *
- * Es la unica placa conectada al Wi-Fi y al backend. Recibe por ESP-NOW los
- * eventos de los nodos C3 (nodo_c3.ino), decide si suena la sirena y avisa al
- * servidor. La alarma funciona aunque no haya Internet.
- *
- * CONFIGURACION SIN RECOMPILAR
- *   Abre el Monitor Serie a 115200 con "Nueva linea" y escribe los comandos.
- *   Todo se guarda en la flash y sobrevive a reinicios:
- *     wifi NOMBRE_DE_LA_RED
- *     clave PASSWORD
- *     token hv_...         (Ajustes > Vivienda > Administrar > Dispositivos)
- *     servidor http://dominio:8080
- *     emparejar            (abre 2 min para que los C3 se enlacen solos)
- *   Escribe "ayuda" para ver el resto.
- *
- * Libreria necesaria: ArduinoJson (Benoit Blanchon) 7.x
- */
+// Concentrador (ESP32 DevKit): la unica placa conectada al Wi-Fi y al backend. Recibe por ESP-NOW los eventos de los
+// nodos C3 (nodo_c3.ino), decide si suena la sirena y avisa al servidor. La alarma funciona aunque no haya Internet.
+//
+// Configuracion sin recompilar: abre el Monitor Serie a 115200 con "Nueva linea" y escribe los comandos;
+// todo queda en flash y sobrevive a reinicios:
+//   wifi NOMBRE_DE_LA_RED
+//   clave PASSWORD
+//   token hv_...         (Ajustes > Vivienda > Administrar > Dispositivos)
+//   servidor http://dominio:8080
+//   emparejar            (abre 2 min para que los C3 se enlacen solos)
+// "ayuda" muestra el resto. Libreria necesaria: ArduinoJson (Benoit Blanchon) 7.x
 
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -36,8 +27,7 @@
 #include <esp_system.h>
 #endif
 
-// ===================== Valores por omision =====================
-// Se pueden cambiar por comando; aqui solo es lo que se usa si no hay nada guardado.
+// Valores por omision: se pueden cambiar por comando y solo se usan si no hay nada guardado.
 
 const char* BACKEND_POR_DEFECTO  = "http://privadaochil.ddns.net:8080";
 const char* VIVIENDA_POR_DEFECTO = "casa-001";   // solo cuenta con el token global antiguo
@@ -54,8 +44,6 @@ const bool HTTPS_VERIFICAR = true;
 // en el codigo: se carga por consola con el comando llave y vive en la flash.
 // Si no hay llave guardada, el sistema funciona sin cifrar y lo avisa.
 const bool USAR_CIFRADO = true;
-
-// ===================== Hardware =====================
 
 // Sirena: buzzer activo o modulo relevador entre este pin y GND
 const int PIN_SALIDA = 4;
@@ -93,9 +81,8 @@ Pir pirs[] = {
 };
 const int NUM_PIRS = USAR_SENSORES_LOCALES ? (int)(sizeof(pirs) / sizeof(pirs[0])) : 0;
 
-// ===================== Protocolo ESP-NOW =====================
-// Igual que en nodo_c3.ino. Los tipos van antes de las funciones porque el
-// Arduino IDE genera los prototipos al inicio del archivo.
+// Protocolo ESP-NOW: igual que en nodo_c3.ino. Los tipos van antes de las funciones porque el Arduino IDE
+// genera los prototipos al inicio del archivo.
 
 const uint8_t TIPO_EVENTO    = 1;
 const uint8_t TIPO_ESTADO    = 2;
@@ -134,15 +121,10 @@ struct NodoVisto {
 
 const uint8_t MAC_BROADCAST[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
-// ===================== Configuracion guardada =====================
-
 Preferences prefs;
 
-// ===================== Seguridad =====================
-// Una sola llave de 16 bytes por instalacion, guardada en la flash y nunca en el
-// codigo. De ella salen la PMK, la LMK de cada nodo y la llave de las firmas.
-// Cada paquete lleva una firma HMAC-SHA256 recortada a 8 bytes. Sin llave el
-// sistema sigue funcionando sin cifrar (solo para pruebas) y lo avisa.
+// Una sola llave de 16 bytes por instalacion, en flash y nunca en el codigo: de ella salen la PMK, la LMK de cada
+// nodo y la llave de las firmas (HMAC-SHA256 recortada a 8 bytes). Sin llave funciona sin cifrar y lo avisa.
 const size_t LARGO_TAG = 8;
 uint8_t llaveMaestra[16];
 uint8_t pmkDerivada[16];
@@ -216,7 +198,6 @@ int nibbleHex(char c) {
   return -1;
 }
 
-// Guarda una llave escrita como 32 digitos hexadecimales
 bool guardarLlaveHex(const String& hex) {
   if (hex.length() != 32) return false;
   uint8_t k[16];
@@ -281,8 +262,6 @@ void guardarNodos() {
   else prefs.putBytes("nodos", pareados, numPareados * 6);
 }
 
-// ===================== Parametros =====================
-
 const unsigned long DEBOUNCE_MS = 50;
 const unsigned long BLOQUEO_PIR_MS = 8000;           // espera minima entre eventos de movimiento
 const unsigned long PIR_ESTABILIZACION_MS = 45000;   // el AM312 tarda 30-60 s tras energizarse
@@ -300,8 +279,6 @@ const bool SALIDA_INTERMITENTE = true;
 const unsigned long INTERVALO_PARPADEO_MS = 300;
 const unsigned long INTERVALO_REPORTE_ALARMA_MS = 1000;
 
-// ===================== Estado interno =====================
-
 bool pirListo = false;
 
 // El AM312 deja su salida en alto solo ~2 s, asi que el flanco se captura con
@@ -315,7 +292,6 @@ unsigned long contadorRegistro = 0;
 unsigned long enviosExitosos = 0;
 unsigned long enviosFallidos = 0;
 
-// Estado que viene del backend
 bool sistemaArmado   = false;
 bool armadoConocido  = false;   // ya se consulto el backend al menos una vez
 bool modoSilencioso  = false;
@@ -359,8 +335,7 @@ struct EventoPendiente {
 EventoPendiente bufferEventos[CAPACIDAD_BUFFER];
 int eventosEnBuffer = 0;
 
-// ===================== HTTP / HTTPS =====================
-// El esquema de la URL del servidor decide: http:// o https://
+// HTTP / HTTPS: el esquema de la URL del servidor decide si es http:// o https://
 
 WiFiClient clienteRed;
 WiFiClientSecure clienteTls;
@@ -388,8 +363,7 @@ void sincronizarAlarma();
 void iniciarEspNow();
 void registrarPares();
 
-// ===================== Wi-Fi no bloqueante =====================
-// Nunca detiene el ciclo: mientras espera la red, los sensores se siguen leyendo.
+// Wi-Fi no bloqueante: nunca detiene el ciclo; mientras espera la red, los sensores se siguen leyendo.
 
 void conectarWiFi() {
   if (cfgSsid.length() == 0) return;
@@ -443,8 +417,6 @@ void iniciarWiFi() {
     conectarWiFi();
   }
 }
-
-// ===================== Envio de mediciones =====================
 
 bool enviarMedicion(unsigned long numeroRegistro, const char* variable,
                     const char* zona, const char* sensorId, const char* nodoId,
@@ -534,8 +506,6 @@ void intentarVaciarBuffer() {
     Serial.println(eventosEnBuffer);
   }
 }
-
-// ===================== Logica de alarma =====================
 
 void guardarDatosAlarma(const char* variable, const char* zona, const char* sensorId, const char* nodoId) {
   strncpy(motivoAlarma, variable, sizeof(motivoAlarma) - 1); motivoAlarma[sizeof(motivoAlarma) - 1] = '\0';
@@ -726,10 +696,8 @@ void actualizarSalida() {
   digitalWrite(PIN_LED_ESTADO, nivel ? HIGH : LOW);
 }
 
-// ===================== Recepcion de nodos (ESP-NOW) =====================
-
-// La recepcion corre en la tarea de Wi-Fi: solo copia el paquete a una cola y
-// el ciclo principal lo procesa, porque procesar un evento hace peticiones HTTP.
+// Recepcion de nodos (ESP-NOW): corre en la tarea de Wi-Fi y solo copia el paquete a una cola; el ciclo principal lo
+// procesa, porque procesar un evento hace peticiones HTTP.
 const int CAP_COLA_RX = 8;
 PaqueteSensor colaRx[CAP_COLA_RX];
 uint8_t colaRxMac[CAP_COLA_RX][6];
@@ -765,11 +733,8 @@ void responderEmparejamiento(const uint8_t* mac, const PaqueteSensor* peticion) 
   esp_now_send(MAC_BROADCAST, (const uint8_t*)&r, sizeof(r));
 }
 
-// Los C3 duermen casi todo el tiempo y solo escuchan un instante despues de
-// transmitir. Por eso la respuesta con el estado de armado sale de inmediato,
-// desde la propia funcion de recepcion. Con cifrado va dirigida (unicast
-// cifrado) solo a ese C3 y firmada; sin llave sale por broadcast como antes.
-// Repite la secuencia de la peticion para que no sirva una respuesta antigua.
+// Los C3 solo escuchan un instante tras transmitir, asi que la respuesta con el estado de armado sale de inmediato desde la
+// recepcion: unicast cifrado y firmada con llave (broadcast sin ella), repitiendo la secuencia para que no sirva una vieja.
 void responderArmado(const uint8_t* mac, uint32_t secuencia) {
   if (!armadoConocido) return;   // el C3 conserva su ultimo valor (por defecto, armado)
   PaqueteSensor r;
@@ -826,10 +791,8 @@ void alRecibirEspNow(const uint8_t* mac, const uint8_t* datos, int largo) {
 }
 #endif
 
-// Anti-replay: los reintentos de un nodo repiten la secuencia y se descartan;
-// tambien se descarta cualquier secuencia MENOR que la ultima aceptada, asi un
-// paquete grabado y reenviado despues no vale. Al reiniciar el concentrador la
-// tabla queda vacia y se vuelve a aprender.
+// Anti-replay: se descartan los reintentos (misma secuencia) y cualquier secuencia MENOR que la ultima aceptada, asi un
+// paquete grabado y reenviado no vale. Al reiniciar el concentrador la tabla queda vacia y se vuelve a aprender.
 const int MAX_ORIGENES = 8;
 OrigenRemoto origenes[MAX_ORIGENES];
 
@@ -876,10 +839,8 @@ EstadoRemoto* crearEstado(const char* sensorId, int valor) {
   return nullptr;
 }
 
-// ===================== Registro automatico de nodos y sensores =====================
-// Cada nodo que se escucha y cada sensor que declara se reportan en un solo
-// POST /nodos/latido (cada 30 s, o enseguida si aparece algo nuevo). Asi la app
-// descubre los sensores y sabe cuando un nodo deja de comunicarse.
+// Registro automatico de nodos y sensores: cada nodo escuchado y cada sensor declarado se reportan en un POST /nodos/latido
+// (cada 30 s, o enseguida si aparece algo nuevo), asi la app descubre sensores y detecta nodos caidos.
 
 const unsigned long LATIDO_INTERVALO_MS = 30000;
 
@@ -1043,8 +1004,6 @@ void atenderRemotos() {
   }
 }
 
-// ===================== Emparejamiento =====================
-
 void abrirEmparejamiento() {
   emparejando = true;
   tFinEmparejar = millis() + DURACION_EMPAREJAR_MS;
@@ -1083,8 +1042,6 @@ void atenderEmparejamiento() {
     }
   }
 }
-
-// ===================== Consola serie =====================
 
 String lineaSerie;
 
@@ -1254,8 +1211,6 @@ void avisarConfigIncompleta() {
   else if (cfgToken.length() == 0) Serial.println("[Config] Falta el token. Escribe: token hv_...");
 }
 
-// ===================== ESP-NOW =====================
-
 // Con cifrado, cada C3 emparejado se registra como par cifrado
 void registrarPares() {
   if (!cifradoActivo) return;
@@ -1292,8 +1247,6 @@ void iniciarEspNow() {
   esp_now_register_recv_cb(alRecibirEspNow);
   Serial.println("[ESP-NOW] Escuchando nodos C3.");
 }
-
-// ===================== setup / loop =====================
 
 void setup() {
   Serial.begin(115200);
@@ -1359,7 +1312,6 @@ void loop() {
     }
   }
 
-  // Sensores de movimiento
   if (NUM_PIRS > 0) {
     if (!pirListo) {
       // Las interrupciones se activan al terminar la estabilizacion para que el

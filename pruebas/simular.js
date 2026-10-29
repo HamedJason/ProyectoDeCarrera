@@ -1,24 +1,16 @@
 #!/usr/bin/env node
-/*
- * Simulador de dispositivos para probar el servidor SIN hardware.
- * Se comporta como el concentrador, un nodo C3 y la camara, con los mismos
- * mensajes que el firmware real. Requiere Node 18 o superior (sin dependencias).
- *
- * Uso:
- *   node simular.js --url https://sentinelhome.ddns.net --token hv_xxx <modo>
- *   (con el servidor en HTTP plano, usa --url http://sentinelhome.ddns.net:8080)
- *
- * Modos:
- *   registro   el hub reporta un nodo C3 nuevo con 2 contactos y un PIR.
- *              Deben aparecer en la app con la etiqueta "Nuevo".
- *   alarma     manda un evento de puerta abierta y el aviso de alarma (con el
- *              retraso_ms del hub). Con la casa ARMADA debe llegar el push, y si
- *              la camara simulada esta corriendo, se toman 3 fotos.
- *   latidos    solo latidos cada 30 s (para ver hub y nodo "en linea"); detenlo
- *              con Ctrl+C y espera ~2 min para probar el aviso de "sin senal".
- *   camara     simula la camara: pregunta tareas y responde fotos y vista en vivo.
- *   estado     imprime el estado de la casa tal como lo ve el hub.
- */
+// Simulador de dispositivos para probar el servidor SIN hardware: concentrador, nodo C3 y camara, con los
+// mismos mensajes que el firmware real. Node 18+, sin dependencias.
+// Uso: node simular.js --url https://sentinelhome.ddns.net --token hv_xxx <modo>
+// (con el servidor en HTTP plano: --url http://sentinelhome.ddns.net:8080)
+//
+// Modos:
+//   registro  el hub reporta un nodo C3 nuevo con 2 contactos y un PIR; deben aparecer en la app como "Nuevo".
+//   alarma    manda puerta abierta y el aviso de alarma (con el retraso_ms del hub). Con la casa ARMADA debe
+//             llegar el push y, si la camara simulada corre, se toman 3 fotos.
+//   latidos   solo latidos cada 30 s; detenlo con Ctrl+C y espera ~2 min para probar el aviso de "sin senal".
+//   camara    simula la camara: pregunta tareas y responde fotos y vista en vivo.
+//   estado    imprime el estado de la casa tal como lo ve el hub.
 
 const args = process.argv.slice(2);
 const opt = (n, d) => { const i = args.indexOf('--' + n); return i >= 0 ? args[i + 1] : d; };

@@ -1,4 +1,3 @@
-<!-- Aviso cuando falla la comunicacion con el servidor -->
 <script setup>
 import { conexion } from '../stores/conexion.js';
 import { refrescar } from '../stores/casa.js';

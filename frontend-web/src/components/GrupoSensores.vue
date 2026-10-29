@@ -1,4 +1,3 @@
-<!-- Grupo de tarjetas de sensores (puertas y ventanas, o movimiento) -->
 <script setup>
 import TarjetaSensor from './TarjetaSensor.vue';
 defineProps({

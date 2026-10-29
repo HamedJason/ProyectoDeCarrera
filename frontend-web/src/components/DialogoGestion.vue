@@ -1,4 +1,3 @@
-<!-- Administracion de la vivienda actual: nombre, miembros, invitaciones, token de dispositivos y borrado -->
 <script setup>
 import { ref, watch } from 'vue';
 import Hoja from './Hoja.vue';

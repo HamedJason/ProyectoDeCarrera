@@ -1,4 +1,3 @@
-<!-- Raiz: decide entre la pantalla de acceso y la aplicacion, y arranca la sesion -->
 <script setup>
 import { onMounted, onBeforeUnmount } from 'vue';
 import AccesoView from './components/AccesoView.vue';

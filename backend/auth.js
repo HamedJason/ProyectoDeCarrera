@@ -1,23 +1,6 @@
-/*
- * Cuentas, sesiones, viviendas y autenticacion de dispositivos.
- *
- * Hay dos tipos de cliente y cada uno se autentica distinto:
- *
- *   Personas (aplicacion web). Inician sesion con correo y contrasena. El
- *   servidor entrega una cookie HttpOnly con un identificador aleatorio; en la
- *   base de datos solo se guarda su resumen SHA-256. Cada consulta comprueba
- *   ademas que la persona sea miembro de la vivienda que pide.
- *
- *   Dispositivos (concentrador y camara). Envian el encabezado X-Device-Token.
- *   Cada vivienda tiene su propio token, del que se guarda unicamente el resumen,
- *   y con el token el servidor sabe a que vivienda pertenece el dispositivo sin
- *   confiar en lo que diga el cuerpo de la peticion. El DEVICE_TOKEN global se
- *   sigue aceptando solo para viviendas que todavia no tienen token propio, de
- *   modo que el firmware ya instalado no deja de funcionar.
- *
- * Solo se usa el modulo crypto de Node (scrypt para las contrasenas), sin
- * dependencias nuevas.
- */
+// Cuentas, sesiones y autenticacion de dispositivos.
+// Personas: cookie HttpOnly con id aleatorio (solo se guarda su SHA-256) y membresia por vivienda.
+// Dispositivos: X-Device-Token propio de cada vivienda (solo su resumen); el DEVICE_TOKEN global solo vale si la vivienda no tiene uno.
 
 const crypto = require('crypto');
 const { promisify } = require('util');
@@ -32,12 +15,8 @@ const REGISTRO_ABIERTO = String(process.env.REGISTRO_ABIERTO || '').toLowerCase(
 const DEVICE_TOKEN = process.env.DEVICE_TOKEN || '';
 const MAX_VIVIENDAS_POR_USUARIO = 10;
 
-// ===================== Utilidades =====================
-
-// Token interno: lo genera el propio proceso al arrancar y solo vive en memoria. Lo usa el agente de la
-// camara (que corre dentro de este mismo servidor) para hablar con el por 127.0.0.1, de modo que no
-// necesita el token de la vivienda, del que el servidor solo guarda el resumen. Solo vale desde la
-// propia maquina y no sirve para nada mas que identificar a un dispositivo de una vivienda existente.
+// Token interno generado al arrancar y solo en memoria: lo usa el agente de la camara
+// (dentro de este servidor) por 127.0.0.1, sin necesitar el token de la vivienda.
 const TOKEN_INTERNO = crypto.randomBytes(32).toString('hex');
 const esLoopback = (req) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket && req.socket.remoteAddress);
 
@@ -99,9 +78,7 @@ function limpiarTexto(v, max) {
   return t === '' ? null : t;
 }
 
-// ===================== Limite de intentos =====================
 // En memoria: basta para un servidor unico y se reinicia con el servicio.
-
 const intentos = new Map();   // clave -> { n, hasta }
 function bloqueado(clave) {
   const f = intentos.get(clave);
@@ -122,8 +99,6 @@ setInterval(() => {
   for (const [k, f] of intentos) if ((f.hasta && f.hasta < ahora) || ahora - f.desde > 3600000) intentos.delete(k);
 }, 600000).unref();
 
-// ===================== Sesiones =====================
-
 async function crearSesion(req, res, usuarioId) {
   const id = aleatorio(32);
   await pool.query(
@@ -141,10 +116,7 @@ async function crearSesion(req, res, usuarioId) {
   ponerCookie(req, res, id, DIAS_SESION * 86400);
 }
 
-/*
- * Middleware global: si hay cookie valida deja la persona en req.usuario. No
- * rechaza nada por si mismo; para eso estan requiereSesion y los demas.
- */
+// Deja a la persona en req.usuario si hay cookie valida; no rechaza nada por si mismo.
 async function cargarSesion(req, _res, next) {
   const id = leerCookies(req)[COOKIE];
   if (!id) return next();
@@ -171,11 +143,7 @@ async function cargarSesion(req, _res, next) {
   next();
 }
 
-/*
- * Defensa contra peticiones enviadas desde otro sitio web. La cookie es
- * SameSite=Lax, y ademas aqui se rechaza cualquier cambio cuyo Origin no sea
- * este mismo servidor.
- */
+// Defensa CSRF: ademas de SameSite=Lax, rechaza cambios cuyo Origin no sea este servidor.
 function verificarOrigen(req, res, next) {
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
   if (req.header('X-Device-Token')) return next();
@@ -197,19 +165,13 @@ function requiereSesion(req, res, next) {
   next();
 }
 
-// ===================== Viviendas y permisos =====================
-
 async function rolEn(usuarioId, viviendaId) {
   const r = await pool.query('SELECT rol FROM miembros WHERE vivienda_id = $1 AND usuario_id = $2', [viviendaId, usuarioId]);
   return r.rowCount ? r.rows[0].rol : null;
 }
 
-/*
- * Comprueba que la persona con sesion pertenezca a la vivienda. Responde el
- * error y devuelve false si no; en ese caso el manejador debe terminar.
- * Para no revelar que viviendas existen, "no existe" y "no eres miembro"
- * dan la misma respuesta.
- */
+// Responde el error y devuelve false si la persona no es miembro. "No existe" y "no eres
+// miembro" dan la misma respuesta para no revelar que viviendas existen.
 async function exigirMiembro(req, res, viviendaId, rolMinimo = 'miembro') {
   if (!req.usuario) {
     res.status(401).json({ ok: false, codigo: 'sin_sesion', mensaje: 'Inicia sesion para continuar.' });
@@ -232,11 +194,8 @@ function viviendaDeSolicitud(req) {
   return (req.query && req.query.vivienda_id) || (req.body && req.body.vivienda_id) || null;
 }
 
-/*
- * Identifica a un dispositivo por su token. Devuelve { viviendaId, global }
- * o null. Con el token global la vivienda se toma de la peticion, y solo se
- * acepta si esa vivienda no tiene token propio.
- */
+// Devuelve { viviendaId, global } o null. Con el token global la vivienda sale de la peticion
+// y solo se acepta si no tiene token propio.
 async function autenticarDispositivo(req) {
   const token = req.header('X-Device-Token');
   if (!token) return null;
@@ -253,7 +212,7 @@ async function autenticarDispositivo(req) {
     const id = limpiarTexto(viviendaDeSolicitud(req), 60);
     if (!id) return null;
     const v = await pool.query('SELECT token_hash FROM viviendas WHERE id = $1', [id]);
-    if (v.rowCount && v.rows[0].token_hash) return null;   // ya tiene token propio
+    if (v.rowCount && v.rows[0].token_hash) return null;
     if (!v.rowCount) {
       // Vivienda nueva que aparece por el token global: se registra sin duenos
       await pool.query(`INSERT INTO viviendas (id, nombre) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`, [id, nombreDesdeId(id)]);
@@ -292,16 +251,11 @@ function nuevoCodigo() {
 const normalizarCodigo = (c) => String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 const formatearCodigo = (c) => c.slice(0, 4) + '-' + c.slice(4);
 
-/*
- * Quien hizo la accion, para la bitacora (RNF-11). Una persona con sesion queda
- * con su nombre; un dispositivo, con el identificador de su nodo.
- */
+// Quien hizo la accion para la bitacora: el nombre de la persona o, en un dispositivo, el id de su nodo.
 function quien(req, respaldo) {
   if (req.usuario) return req.usuario.nombre;
   return respaldo || 'dispositivo';
 }
-
-// ===================== Rutas =====================
 
 function montarRutas(app, ganchos = {}) {
   const emailValido = (e) => typeof e === 'string' && e.length <= 120 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
@@ -474,8 +428,6 @@ function montarRutas(app, ganchos = {}) {
     }
   });
 
-  // ---------- Viviendas ----------
-
   app.get('/viviendas', requiereSesion, async (req, res) => {
     try {
       res.json({ ok: true, viviendas: await listarViviendas(req.usuario.id) });
@@ -545,8 +497,6 @@ function montarRutas(app, ganchos = {}) {
       res.status(500).json({ ok: false, mensaje: 'No se pudo eliminar la vivienda.', detalle: detalleError(e) });
     }
   });
-
-  // ---------- Miembros e invitaciones ----------
 
   app.get('/viviendas/:id/miembros', requiereSesion, async (req, res) => {
     try {

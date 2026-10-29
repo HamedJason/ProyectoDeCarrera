@@ -1,7 +1,4 @@
-<!--
-  Historial como linea de tiempo. Se muestra resumido (los ultimos eventos) y se
-  despliega bajo demanda, para que la pantalla principal no se alargue con el uso.
--->
+<!-- Se muestra resumido (los ultimos eventos) y se despliega bajo demanda para no alargar la pantalla principal. -->
 <script setup>
 import { ref, computed } from 'vue';
 import { hitos, cargado } from '../stores/casa.js';

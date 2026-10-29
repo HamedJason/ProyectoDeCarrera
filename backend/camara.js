@@ -1,28 +1,8 @@
-/*
- * Camara de la vivienda (ESP32 con sensor OV5640).
- *
- * Como funciona, y por que asi:
- *
- *   La camara y el servidor nunca se comunican en sentido servidor -> camara,
- *   porque la camara esta detras del router de la casa. Es la camara la que
- *   pregunta. Para que no tarde en enterarse, pregunta con una peticion larga
- *   (GET /camara/tarea?espera=20): el servidor la deja abierta hasta 20 s y la
- *   contesta en el instante en que aparece una tarea. Cuando no hay nada que
- *   hacer cuesta una peticion cada 20 s, y cuando suena la alarma la camara
- *   se entera en milisegundos, sin necesidad de ESP-NOW.
- *
- *   Tareas:
- *     foto  una rafaga de fotos (por una alarma, o a peticion del usuario)
- *     vivo  una sesion de vista en vivo, con tiempo maximo y cuota diaria
- *
- *   Las fotos se guardan como archivos en disco con un tope de dias y de
- *   espacio por vivienda y total, porque el disco del VPS es el recurso mas
- *   escaso: no se guarda video, solo imagenes fijas. En la vista en vivo el
- *   servidor solo retransmite el ultimo cuadro que recibe, sin guardarlo.
- *
- *   Las fotos y los cuadros llegan como cuerpo crudo image/jpeg, sin
- *   multipart, para que el ESP32 pueda enviarlos con un POST sencillo.
- */
+// Camara de la vivienda (ESP32 con OV5640). Esta detras del router de la casa, asi que es ella
+// quien pregunta: GET /camara/tarea?espera=20 queda abierta hasta 20 s y se contesta en cuanto
+// aparece una tarea (foto o vista en vivo), sin ESP-NOW.
+// Las fotos se guardan en disco con topes de dias y espacio (el disco del VPS es lo mas escaso);
+// la vista en vivo solo retransmite el ultimo cuadro. Las imagenes llegan como image/jpeg crudo.
 
 const crypto = require('crypto');
 const fs = require('fs');
@@ -33,8 +13,6 @@ const { pool } = require('./db');
 const { detalleError } = require('./errores');
 const auth = require('./auth');
 const { exigirMiembro, autenticarDispositivo, rechazarDispositivo, quien, limpiarTexto } = auth;
-
-// ===================== Configuracion =====================
 
 const num = (v, def) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : def);
 
@@ -55,13 +33,9 @@ let notificarFn = null;
 let registrarAccionFn = null;
 let notificarFotoFn = null;
 
-/*
- * Enlaces firmados para mostrar una foto dentro de una notificacion push. El
- * sistema operativo descarga la imagen sin sesion, asi que el enlace lleva una
- * firma (HMAC) con caducidad corta y solo sirve para esa foto. El secreto se
- * genera al arrancar: tras un reinicio los enlaces pendientes dejan de valer,
- * lo cual es aceptable porque duran minutos.
- */
+// Enlaces firmados (HMAC, caducidad corta, validos solo para esa foto) para mostrarla en una
+// notificacion push, porque el sistema descarga la imagen sin sesion. El secreto se genera al
+// arrancar: tras un reinicio los enlaces pendientes dejan de valer.
 const SECRETO_FIRMA = crypto.randomBytes(32);
 const FIRMA_TTL_S = 15 * 60;
 function firmarFoto(id) {
@@ -77,13 +51,9 @@ function firmaValida(id, t) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-// ===================== Estado en memoria =====================
-
 const esperando = new Map();   // viviendaId -> Set de { res, timer, camaraId }
 const vivos = new Map();       // viviendaId -> { tareaId, sesionId, inicio, clientes:Set, cuadro, ultimoCliente }
 const ultimaAuto = new Map();  // viviendaId -> instante de la ultima foto automatica
-
-// ===================== Utilidades =====================
 
 const esJpeg = (b) => Buffer.isBuffer(b) && b.length > 4 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
 const rutaFoto = (id) => path.join(DIR_FOTOS, String(Math.floor(id / 1000)), `${id}.jpg`);
@@ -114,8 +84,6 @@ async function camaraEnLinea(viviendaId) {
   return r.rowCount ? r.rows[0] : null;
 }
 
-// ===================== Tareas =====================
-
 function despertarCamara(viviendaId) {
   const grupo = esperando.get(viviendaId);
   if (!grupo || grupo.size === 0) return;
@@ -135,12 +103,8 @@ async function crearTarea(viviendaId, tipo, { motivo = null, sensorId = null, ca
   return r.rows[0].id;
 }
 
-/*
- * Solicitud automatica por una alarma (o por una deteccion de la camara, con
- * opciones.usuario = 'evento'). No espera ni falla: la alerta al usuario
- * nunca debe depender de la camara (RF-15). Si no hay camara conectada, o ya se
- * pidio una foto hace poco, no hace nada.
- */
+// Solicitud automatica por una alarma o deteccion de la camara (usuario = 'evento'). No espera ni
+// falla: la alerta nunca depende de la camara. No hace nada si no hay camara o se pidio una foto hace poco.
 async function solicitarFotoAlarma(viviendaId, motivo, sensorId, opciones = {}) {
   try {
     if (Date.now() - (ultimaAuto.get(viviendaId) || 0) < 15000) return;
@@ -180,8 +144,6 @@ async function entregarTarea(viviendaId, camaraId, res) {
   return res.json({ ok: true, tarea: { id: t.id, tipo: 'vivo', restante_s: restante } });
 }
 
-// ===================== Vista en vivo =====================
-
 async function minutosVivoUsados(viviendaId) {
   const r = await pool.query(
     `SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (COALESCE(fin, NOW()) - inicio))), 0) AS seg
@@ -208,12 +170,7 @@ function vigilarVivos() {
   }
 }
 
-// ===================== Almacenamiento =====================
-
-/*
- * Aplica los topes de espacio: borra lo mas antiguo de una vivienda hasta que
- * quepa una imagen nueva, y despues lo mas antiguo de todo el servidor.
- */
+// Aplica los topes: borra lo mas antiguo de la vivienda hasta que quepa la imagen y luego lo mas antiguo del servidor.
 async function hacerEspacio(viviendaId, bytesNuevos) {
   const limiteV = FOTOS_MB_VIVIENDA * 1048576;
   const ids = [];
@@ -239,7 +196,6 @@ async function mantenimiento() {
       `DELETE FROM fotos WHERE creado_en < NOW() - ($1 || ' days')::interval RETURNING id`, [String(FOTOS_DIAS)]);
     await borrarFotos(caducas.rows.map((f) => f.id));
 
-    // Tope total: se descartan las mas antiguas de todo el servidor
     const limite = FOTOS_MB_TOTAL * 1048576;
     const tot = await pool.query('SELECT COALESCE(SUM(bytes), 0)::bigint AS b FROM fotos');
     let usado = Number(tot.rows[0].b);
@@ -280,8 +236,6 @@ async function iniciar() {
   console.log(`Camara lista. Fotos en ${DIR_FOTOS} (se conservan ${FOTOS_DIAS} dias, tope ${FOTOS_MB_VIVIENDA} MB por vivienda).`);
 }
 
-// ===================== Rutas =====================
-
 function montarRutas(app, ganchos = {}) {
   notificarFn = ganchos.notificar;
   registrarAccionFn = ganchos.registrarAccion;
@@ -289,13 +243,7 @@ function montarRutas(app, ganchos = {}) {
 
   const cuerpoCrudo = (limite) => express.raw({ type: ['image/jpeg', 'application/octet-stream'], limit: limite });
 
-  // ---------- Dispositivo: la camara ----------
-
-  /*
-   * GET /camara/tarea?camara_id=...&espera=20
-   * La camara pregunta si hay algo que hacer. Con "espera" la peticion queda
-   * abierta hasta ese numero de segundos esperando una tarea.
-   */
+  // "espera": segundos que la peticion queda abierta esperando una tarea.
   app.get('/camara/tarea', async (req, res) => {
     const disp = await autenticarDispositivo(req).catch(() => null);
     if (!disp) return rechazarDispositivo(res);
@@ -313,7 +261,6 @@ function montarRutas(app, ganchos = {}) {
         'SELECT 1 FROM tareas_camara WHERE vivienda_id = $1 AND terminada_en IS NULL LIMIT 1', [viviendaId]);
       if (hay.rowCount || espera === 0) return entregarTarea(viviendaId, camaraId, res);
 
-      // Nada pendiente: se deja la peticion abierta
       const espero = { res, camaraId, timer: null };
       espero.timer = setTimeout(() => {
         const g = esperando.get(viviendaId);
@@ -338,11 +285,7 @@ function montarRutas(app, ganchos = {}) {
     }
   });
 
-  /*
-   * POST /camara/foto?tarea=ID&camara_id=...
-   * Cuerpo: la imagen JPEG tal cual. Solo se aceptan fotos de una tarea abierta
-   * de esta vivienda, para que un token filtrado no pueda llenar el disco.
-   */
+  // Solo se aceptan fotos de una tarea abierta de esta vivienda, para que un token filtrado no llene el disco.
   app.post('/camara/foto', cuerpoCrudo(FOTO_MAX_BYTES), async (req, res) => {
     const disp = await autenticarDispositivo(req).catch(() => null);
     if (!disp) return rechazarDispositivo(res);
@@ -383,8 +326,7 @@ function montarRutas(app, ganchos = {}) {
         throw e;
       }
 
-      // La primera foto de una alarma se manda en una notificacion, sin esperar
-      // el resto de la rafaga. Si falla, no afecta a la foto ya guardada.
+      // La primera foto de una alarma se manda en una notificacion sin esperar el resto de la rafaga.
       // 'evento' es una deteccion de la camara (persona o movimiento): mismo mecanismo, otro texto.
       if ((tarea.usuario === 'alarma' || tarea.usuario === 'evento') && tarea.tomadas === 0 && notificarFotoFn) {
         Promise.resolve(notificarFotoFn(viviendaId, id, firmarFoto(id), tarea)).catch((e) => console.error('Push con foto:', e.message));
@@ -401,10 +343,6 @@ function montarRutas(app, ganchos = {}) {
     }
   });
 
-  /*
-   * POST /camara/cuadro?tarea=ID
-   * Un cuadro de la vista en vivo. La respuesta dice si debe seguir enviando.
-   */
   app.post('/camara/cuadro', cuerpoCrudo(CUADRO_MAX_BYTES), async (req, res) => {
     const disp = await autenticarDispositivo(req).catch(() => null);
     if (!disp) return rechazarDispositivo(res);
@@ -423,8 +361,6 @@ function montarRutas(app, ganchos = {}) {
     const quedan = Math.max(0, VIVO_SESION_MAX_S - Math.floor((Date.now() - v.inicio) / 1000));
     return res.json({ ok: true, continuar: quedan > 0, restante_s: quedan });
   });
-
-  // ---------- Persona: la aplicacion ----------
 
   app.get('/camara/estado', async (req, res) => {
     const viviendaId = req.query.vivienda_id;
@@ -542,11 +478,7 @@ function montarRutas(app, ganchos = {}) {
     res.json({ ok: true });
   });
 
-  /*
-   * GET /camara/vivo?vivienda_id=...
-   * Flujo MJPEG (multipart/x-mixed-replace): el navegador lo muestra con una
-   * simple etiqueta <img>. La sesion se comprueba con la cookie.
-   */
+  // Flujo MJPEG (multipart/x-mixed-replace): el navegador lo muestra con una etiqueta <img>.
   app.get('/camara/vivo', async (req, res) => {
     const viviendaId = req.query.vivienda_id;
     if (!(await exigirMiembro(req, res, viviendaId))) return;

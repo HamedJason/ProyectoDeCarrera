@@ -61,7 +61,7 @@ if [ "$DRY_RUN" -eq 0 ] && [ "$(id -u)" -ne 0 ]; then
   fallo "ejecuta como root (sudo), o usa --dry-run para probar sin tocar el sistema"
 fi
 
-# ---------------------------------------------------------------- 1. subredes
+# Subredes
 # Rutas del servidor. RUTAS_ARCHIVO permite probar el script con rutas de ejemplo.
 rutas_actuales() {
   if [ -n "${RUTAS_ARCHIVO:-}" ]; then cat "$RUTAS_ARCHIVO"; else ip -4 route show; fi
@@ -96,7 +96,7 @@ if malas:
 paso "Comprobando que ${SUBRED_TUNEL} y ${SUBRED_AP} estan libres"
 comprobar_subredes
 
-# --------------------------------------------------------------- 2. paquetes
+# Paquetes
 if [ "$DRY_RUN" -eq 0 ]; then
   faltan=()
   command -v wg >/dev/null 2>&1      || faltan+=(wireguard-tools)
@@ -110,7 +110,7 @@ if [ "$DRY_RUN" -eq 0 ]; then
 fi
 command -v wg >/dev/null 2>&1 || fallo "falta el comando 'wg' (paquete wireguard-tools)"
 
-# ---------------------------------------------------------------- 3. claves
+# Claves
 mkdir -p "$WG_DIR"
 chmod 700 "$WG_DIR"
 CONF="${WG_DIR}/${WG_IF}.conf"
@@ -138,7 +138,7 @@ generar "$K_PSK" wg genpsk
 PUB_SRV="$(wg pubkey < "$K_SRV")"
 PUB_ESP="$(wg pubkey < "$K_ESP")"
 
-# ---------------------------------------------------------------- 4. wg0.conf
+# wg0.conf
 paso "Escribiendo ${CONF}"
 cat > "$CONF" <<EOF
 # Generado por instalar_wireguard.sh. No subir este archivo a ningun repositorio.
@@ -158,7 +158,7 @@ AllowedIPs = ${IP_ESP32}/32, ${SUBRED_AP}
 EOF
 chmod 600 "$CONF"
 
-# ------------------------------------------------- comando para el ESP32
+# Comando para el ESP32
 if [ -z "$IP_PUBLICA" ]; then
   if command -v ip >/dev/null 2>&1; then
     IP_PUBLICA="$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1)"
@@ -174,7 +174,7 @@ fi
 chmod 600 "$SALIDA"
 paso "Comando para el ESP32 guardado en ${SALIDA} (permisos 600)"
 
-# ------------------------------------------------- servicio y firewall
+# Servicio y firewall
 if [ "$DRY_RUN" -eq 0 ]; then
   if systemctl is-active --quiet "wg-quick@${WG_IF}"; then
     paso "Reiniciando wg-quick@${WG_IF}"

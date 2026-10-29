@@ -1,22 +1,12 @@
 #!/usr/bin/env node
-/*
- * Prueba manual de ONVIF contra la camara REAL (no necesita base de datos ni
- * el resto del backend). Sirve para comprobar en el VPS, con la MC210 a traves
- * del tunel, justo lo que la prueba automatica solo puede simular:
- *
- *   - que la camara acepta la autenticacion y la hora;
- *   - que direcciones anuncia (las internas, 192.168.x.x, se reescriben);
- *   - que topics publica realmente (GetEventProperties);
- *   - que mensajes llegan al caminar frente a ella, con su PropertyOperation;
- *   - como los interpreta el motor de estados (eventos y alertas).
- *
- * Uso (dentro del contenedor del backend, o con Node en el VPS):
- *   ONVIF_USUARIO=usuario ONVIF_CLAVE=clave node onvif/probar.js [segundos]
- *   ONVIF_HOST=10.8.0.2 ONVIF_PUERTO=2020 ONVIF_LOG_XML=/tmp/onvif.xml.log node onvif/probar.js 90
- *
- * La clave se lee del entorno para que no quede en el historial del shell ni
- * en la lista de procesos. El registro XML, si se activa, oculta las credenciales.
- */
+// Prueba manual de ONVIF contra la camara REAL (sin base de datos ni el resto del backend), para comprobar
+// en el VPS lo que la prueba automatica solo simula: autenticacion y hora, direcciones que anuncia, topics
+// que publica, mensajes al caminar frente a ella y como los interpreta el motor de estados.
+//
+// Uso (dentro del contenedor del backend, o con Node en el VPS):
+//   ONVIF_USUARIO=usuario ONVIF_CLAVE=clave node onvif/probar.js [segundos]
+//   ONVIF_HOST=10.8.0.2 ONVIF_PUERTO=2020 ONVIF_LOG_XML=/tmp/onvif.xml.log node onvif/probar.js 90
+// La clave va por entorno para que no quede en el historial del shell ni en la lista de procesos.
 
 const { ClienteOnvif, ErrorOnvif } = require('./cliente');
 const { MotorEventos } = require('./estados');

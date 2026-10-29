@@ -1,17 +1,8 @@
-/*
- * Prueba de extremo a extremo de la alarma disparada por la camara: el servidor REAL
- * (server.js) con PostgreSQL en memoria (PGlite) y la camara ONVIF simulada.
- *
- * Es lo mas delicado del modulo, porque enciende la salida audible. Comprueba que:
- *   - con el sistema armado y ONVIF_SIRENA=movimiento, un movimiento marca la alarma y enciende la salida;
- *   - la salida se apaga sola al cumplirse el tiempo;
- *   - apagar la alarma desde la aplicacion apaga tambien la salida, y el temporizador no actua despues;
- *   - desarmar el sistema apaga la salida;
- *   - si el servidor se reinicia mientras suena, al arrancar queda todo apagado;
- *   - el retardo de salida y el sistema desarmado impiden que suene.
- *
- * Necesita @electric-sql/pglite y @electric-sql/pglite-socket. Sin ellos, se omite.
- */
+// Prueba de extremo a extremo de la alarma disparada por la camara (servidor REAL, PGlite y camara ONVIF
+// simulada). Es lo mas delicado del modulo porque enciende la salida audible: comprueba que la salida se
+// apaga sola, al apagar la alarma, al desarmar y tras reiniciar el servidor, y que el retardo de salida y el
+// sistema desarmado impiden que suene.
+// Necesita @electric-sql/pglite y @electric-sql/pglite-socket; sin ellos se omite.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -124,7 +115,7 @@ test('alarma por camara: suena armado, se apaga sola, desde la app, al desarmar 
     assert.equal(e.alarma_activa, false);
     assert.equal(e.actuador_activo, false);
 
-    // --- 1. Movimiento con el sistema armado: suena
+    // --- Movimiento con el sistema armado: suena
     camaraOnvif.emitir({ tipo: 'movimiento', valor: true });
     assert.ok(await hasta(async () => (await estado()).alarma_activa === true, 8000), `la alarma no se activo:\n${salida.slice(-1500)}`);
     e = await estado();
@@ -136,7 +127,7 @@ test('alarma por camara: suena armado, se apaga sola, desde la app, al desarmar 
     // La foto de evidencia de la alarma llega por el mecanismo de siempre
     assert.ok(await hasta(async () => (await db.query(`SELECT 1 FROM fotos WHERE vivienda_id = 'casa-001'`)).rows.length >= 2, 25000), `no se guardaron las fotos de la alarma:\n${salida.slice(-1500)}`);
 
-    // --- 2. Se apaga sola al cumplirse el tiempo (3 s)
+    // --- Se apaga sola al cumplirse el tiempo (3 s)
     assert.ok(await hasta(async () => (await estado()).actuador_activo === false, 8000), 'la salida no se apago sola');
     e = await estado();
     assert.equal(e.alarma_activa, false);
@@ -144,7 +135,7 @@ test('alarma por camara: suena armado, se apaga sola, desde la app, al desarmar 
     assert.ok(await hayAccion((a) => a.accion === 'alarma_terminada' && a.usuario === 'camara'), 'no quedo en el historial la alarma terminada');
     assert.ok(await hayAccion((a) => a.accion === 'salida_audible' && a.valor_nuevo === 'false' && a.usuario === 'camara'), 'no quedo en el historial la salida apagada');
 
-    // --- 3. Apagarla desde la app apaga tambien la salida, y el temporizador no actua despues
+    // --- Apagarla desde la app apaga tambien la salida, y el temporizador no actua despues
     await moverse();
     assert.ok(await hasta(async () => (await estado()).alarma_activa === true, 8000), 'la segunda alarma no se activo');
     assert.equal((await estado()).actuador_activo, true);
@@ -157,7 +148,7 @@ test('alarma por camara: suena armado, se apaga sola, desde la app, al desarmar 
     await esperarMs(3600);   // pasa el tiempo del temporizador cancelado
     assert.equal((await acciones()).filter((a) => a.accion === 'alarma_terminada').length, terminadasAntes, 'el temporizador actuo despues de apagar la alarma');
 
-    // --- 4. Desarmar el sistema con la alarma sonando apaga la salida
+    // --- Desarmar el sistema con la alarma sonando apaga la salida
     await moverse();
     assert.ok(await hasta(async () => (await estado()).alarma_activa === true, 8000), 'la tercera alarma no se activo');
     const d = await post('/estado', { vivienda_id: 'casa-001', armado: false });
@@ -166,14 +157,14 @@ test('alarma por camara: suena armado, se apaga sola, desde la app, al desarmar 
     assert.equal(e.alarma_activa, false);
     assert.equal(e.actuador_activo, false, 'desarmar dejo la salida encendida');
 
-    // --- 5. Desarmado no suena, aunque la camara detecte movimiento
+    // --- Desarmado no suena, aunque la camara detecte movimiento
     await moverse();
     assert.ok(await hasta(async () => (await db.query(`SELECT 1 FROM eventos_camara WHERE nota = 'sistema desarmado'`)).rows.length >= 1, 6000));
     e = await estado();
     assert.equal(e.alarma_activa, false);
     assert.equal(e.actuador_activo, false);
 
-    // --- 6. Reinicio del servidor mientras suena: al arrancar no queda nada encendido
+    // --- Reinicio del servidor mientras suena: al arrancar no queda nada encendido
     await armar(true);
     await moverse();
     assert.ok(await hasta(async () => (await estado()).alarma_activa === true, 8000), 'la alarma del reinicio no se activo');

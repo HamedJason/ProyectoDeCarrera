@@ -1,4 +1,3 @@
-<!-- Bandas de aviso: concentrador sin conexion, nodos caidos y sensores nuevos por confirmar -->
 <script setup>
 import { computed } from 'vue';
 import { estado, sensores, nodos } from '../stores/casa.js';

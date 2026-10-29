@@ -1,4 +1,4 @@
-/* ---- Deteccion de la camara ---- */
+/* Deteccion de la camara */
 .det { margin-top: 16px; }
 .det-estado { font-size: 13px; color: var(--tinta-2); }
 .det-estado b { color: var(--tinta); font-weight: 700; }
@@ -16,7 +16,7 @@
 .eventos .alarma .etiqueta { background: var(--sirena-claro); color: var(--sirena-texto); }
 .eventos .vacio { color: var(--tinta-2); font-size: 14px; padding: 8px 0; }
 
-/* ---- Camara (bloque dentro de la tarjeta de estado) ---- */
+/* Camara (bloque dentro de la tarjeta de estado) */
 .lado { display: block; }
 .cam-mini {
   --c: var(--tinta-2);

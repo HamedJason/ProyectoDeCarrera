@@ -1,4 +1,4 @@
-/* ---- Barra superior ---- */
+/* Barra superior */
 .barra {
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px; padding: 6px 2px 14px;
@@ -8,7 +8,7 @@
 .punto-vivo { width: 8px; height: 8px; border-radius: 50%; background: var(--pino); flex-shrink: 0; }
 .punto-vivo.muerto { background: var(--sirena); }
 
-/* ---- Aviso de comunicacion ---- */
+/* Aviso de comunicacion */
 #aviso {
   display: none;
   background: var(--sirena-claro);
@@ -24,7 +24,7 @@
   color: var(--sirena-texto); font-weight: 700; text-decoration: underline; cursor: pointer;
 }
 
-/* ---- Escena: titular, plano y controles ---- */
+/* Escena: titular, plano y controles */
 .escena {
   background: var(--papel);
   border: 1px solid var(--linea);
@@ -47,7 +47,7 @@
 .escena.alarma .titular { color: var(--sirena-texto); }
 .subtitular { margin: 8px 0 0; font-size: 15px; color: var(--tinta-2); min-height: 1.45em; }
 
-/* ---- Grupos de sensores ---- */
+/* Grupos de sensores */
 .grupo-cab { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 28px 0 0; }
 .grupo-cab h2 { margin: 0; }
 .grupo-cab .cuenta { font-size: 13px; color: var(--tinta-2); font-variant-numeric: tabular-nums; }

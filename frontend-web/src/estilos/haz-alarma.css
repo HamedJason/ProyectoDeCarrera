@@ -1,9 +1,5 @@
-/* =========================================================
-   Haz de alarma. Dos luces rojas opuestas que giran sobre toda la
-   pantalla, como la torreta de una patrulla. Es solo una capa visual:
-   deja pasar los toques y la intensidad es baja para que el texto
-   debajo conserve su contraste.
-   ========================================================= */
+/* Haz de alarma: dos luces rojas opuestas que giran sobre toda la pantalla, como la torreta de una patrulla. Solo es una capa
+   visual: deja pasar los toques y su intensidad es baja para no restar contraste al texto. */
 .haz-alarma {
   position: fixed; inset: 0; z-index: 40; pointer-events: none; overflow: hidden;
   animation: haz-entra .5s ease-out;

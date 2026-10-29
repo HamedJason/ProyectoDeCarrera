@@ -1,4 +1,3 @@
-<!-- Vista en vivo de la camara -->
 <script setup>
 import { ref, watch, onBeforeUnmount } from 'vue';
 import Hoja from './Hoja.vue';

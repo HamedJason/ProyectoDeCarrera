@@ -1,10 +1,5 @@
-/*
- * Registro de los mensajes XML de ONVIF, para entender como se comporta el
- * firmware de la camara. Siempre oculta las credenciales antes de escribir.
- *
- * Se activa con ONVIF_LOG_XML=<ruta del archivo>. El archivo se rota al llegar
- * a un tamano maximo (queda un solo respaldo .1), asi que no crece sin limite.
- */
+// Registro de los mensajes XML de ONVIF para diagnosticar la camara; siempre oculta las credenciales.
+// Se activa con ONVIF_LOG_XML=<ruta>; el archivo rota al llegar a un tamano maximo (queda un respaldo .1).
 
 const fs = require('fs');
 const path = require('path');

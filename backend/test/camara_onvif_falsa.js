@@ -1,12 +1,7 @@
-/*
- * Camara ONVIF simulada para las pruebas. Imita lo que se sabe de la MC210:
- *   - autentica con WS-Security (PasswordDigest) y compara la hora con su reloj;
- *   - anuncia sus servicios con su direccion INTERNA (192.168.4.2:2020), que el
- *     cliente debe reescribir;
- *   - manda siempre PropertyOperation="Initialized", cambie o no el valor;
- *   - PullMessages es long polling.
- * Tambien permite provocar fallos: expirar la suscripcion, caer, hora distinta.
- */
+// Camara ONVIF simulada que imita a la MC210: autentica con WS-Security (PasswordDigest) comparando la hora
+// con su reloj, anuncia sus servicios con su direccion INTERNA (192.168.4.2:2020), que el cliente debe
+// reescribir, manda siempre PropertyOperation="Initialized" y PullMessages es long polling.
+// Tambien permite provocar fallos: expirar la suscripcion, caer, hora distinta.
 
 const http = require('http');
 const crypto = require('crypto');

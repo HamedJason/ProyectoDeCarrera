@@ -1,4 +1,3 @@
-<!-- Viviendas de la cuenta, cambio de contrasena y cierre de sesion -->
 <script setup>
 import { ref, watch } from 'vue';
 import Hoja from './Hoja.vue';

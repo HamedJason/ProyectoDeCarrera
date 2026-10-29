@@ -1,8 +1,4 @@
-/*
- * Estado de la sesion: quien inicio sesion, que vivienda se esta viendo y que
- * pantalla corresponde (acceso o aplicacion). Solo guarda datos; las acciones
- * que cambian de pantalla estan en cuenta.js.
- */
+// Estado de la sesion: quien inicio sesion, que vivienda se ve y que pantalla corresponde. Solo guarda datos; las acciones estan en cuenta.js.
 import { ref, reactive, computed } from 'vue';
 
 export const sesion = ref(null);       // { usuario, viviendas } cuando hay sesion iniciada

@@ -1,12 +1,9 @@
-/* =========================================================
-   Ilustraciones. Todas tienen una animacion ambiental en reposo
-   y cambian de comportamiento cuando el sensor se activa.
-   ========================================================= */
+/* Todas las ilustraciones tienen una animacion ambiental en reposo y cambian de comportamiento cuando el sensor se activa. */
 
 @keyframes parpadeo { 0%, 86%, 100% { opacity: 1; } 92% { opacity: .15; } }
 @keyframes respirar { 0%, 100% { opacity: .35; transform: scale(.85); } 50% { opacity: 1; transform: scale(1.1); } }
 
-/* ---- Puerta vista de frente ---- */
+/* Puerta vista de frente */
 .pu { position: relative; width: 84px; height: 108px; margin-top: 8px; perspective: 430px; perspective-origin: 50% 100%; clip-path: inset(-40px -40px 0 -40px); }
 .pu .marco { position: absolute; inset: 0; border: 6px solid var(--obj-marco); border-bottom: 0; border-radius: 5px 5px 0 0; transition: border-color .4s; }
 .pu .vano {
@@ -48,7 +45,7 @@
 .abierta .pu .led, .abierta.armado .pu .led { background: var(--ambar); box-shadow: 0 0 7px var(--ambar); animation: parpadeo .7s infinite; }
 .disparado .pu .led { background: var(--sirena); box-shadow: 0 0 8px var(--sirena); animation: parpadeo .3s infinite; }
 
-/* ---- Ventana vista desde adentro ---- */
+/* Ventana vista desde adentro */
 .vn { position: relative; width: 104px; height: 92px; margin-top: 4px; perspective: 520px; }
 .vn .marco { position: absolute; inset: 0; overflow: hidden; border: 5px solid var(--obj-marco); border-radius: 5px; background: #0E1A2D; transition: border-color .4s; }
 .abierta .vn .marco { border-color: var(--ambar); }
@@ -118,7 +115,7 @@
 .abierta .vn .led, .abierta.armado .vn .led { background: var(--ambar); box-shadow: 0 0 7px var(--ambar); animation: parpadeo .7s infinite; }
 .disparado .vn .led { background: var(--sirena); box-shadow: 0 0 8px var(--sirena); animation: parpadeo .3s infinite; }
 
-/* ---- Sensor de movimiento (PIR) ---- */
+/* Sensor de movimiento (PIR) */
 .pr { position: relative; width: 100px; height: 100px; display: grid; place-items: center; }
 .pr .placa { position: absolute; width: 66px; height: 80px; border-radius: 16px; background: var(--obj-placa); box-shadow: 0 2px 0 var(--obj-sombra), 0 10px 16px rgba(21, 48, 43, .16); }
 .pr .led { position: absolute; left: 50%; top: calc(50% - 32px); width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%; background: var(--obj-led-off); }
@@ -149,7 +146,7 @@
 .actividad .pr .placa, .disparado .pr .placa { animation: vibra .16s linear infinite; }
 @keyframes vibra { 0%, 100% { transform: translate(0, 0); } 25% { transform: translate(-1px, .5px); } 75% { transform: translate(1px, -.5px); } }
 
-/* ---- Sirena ---- */
+/* Sirena */
 .si { position: relative; width: 100px; height: 100px; }
 .si .haz {
   position: absolute; left: 50%; top: 36%; width: 240px; height: 240px; margin: -120px 0 0 -120px; border-radius: 50%; opacity: 0; transition: opacity .3s;

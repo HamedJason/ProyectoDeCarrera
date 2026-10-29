@@ -1,4 +1,3 @@
-<!-- Ajustes de la vivienda y de este dispositivo -->
 <script setup>
 import { estado, alternarSilencio, alternarSirena } from '../stores/casa.js';
 import { avisosActivos, notaAvisos, conPush, textoPrueba, alternarAvisos, probarPush } from '../stores/avisos.js';

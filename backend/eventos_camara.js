@@ -1,30 +1,16 @@
-/*
- * Eventos de la camara: personas y movimiento detectados por la propia camara
- * (ONVIF), sin procesar video en este servidor.
- *
- * Une tres cosas:
- *   - el servicio ONVIF (onvif/servicio.js), que recibe los mensajes;
- *   - el motor de estados (onvif/estados.js), que decide que es un cambio real
- *     y cuando merece una alerta;
- *   - el resto del backend: base de datos, avisos y foto de evidencia.
- *
- * Politica por omision (se cambia con variables de entorno):
- *   - TODO cambio real queda en la tabla eventos_camara.
- *   - Solo AVISAN las personas (ONVIF_ALERTAR=persona). El movimiento se registra.
- *     Combinacion recomendada: ONVIF_SIRENA=persona (la persona hace sonar la alarma) y
- *     ONVIF_ALERTAR=persona,movimiento (el movimiento solo manda un aviso para que el
- *     residente mire la camara; suena como maximo una vez cada ONVIF_COOLDOWN_MOVIMIENTO_S).
- *   - Solo avisa con el sistema armado (ONVIF_SOLO_ARMADO=1): con alguien en casa
- *     una persona en el encuadre es lo normal.
- *   - NO activa la sirena. Solo si se pide con ONVIF_SIRENA=movimiento (o persona) y
- *     el sistema esta armado: entonces se marca la alarma y suena la salida audible
- *     por ONVIF_SIRENA_S segundos (ver activarAlarmaCamara en server.js). Una persona
- *     cuenta tambien como movimiento. Con ONVIF_SIRENA vacio nunca toca la alarma.
- *   - Retardo de salida: los primeros ONVIF_RETARDO_SALIDA_S segundos despues de armar
- *     no se avisa ni suena nada, para no disparar la alarma con el residente saliendo.
- *
- * Sin ONVIF_ACTIVO=1 este modulo no hace nada.
- */
+// Eventos de la camara (ONVIF): personas y movimiento detectados por la propia camara, sin procesar video aqui.
+// Une el servicio ONVIF (onvif/servicio.js), el motor de estados (onvif/estados.js) y el resto del backend
+// (base de datos, avisos y foto de evidencia). Sin ONVIF_ACTIVO=1 no hace nada.
+//
+// Politica por omision, ajustable con variables de entorno:
+//   - Todo cambio real queda en eventos_camara. Solo avisan las personas (ONVIF_ALERTAR=persona) y solo con
+//     el sistema armado (ONVIF_SOLO_ARMADO=1): con alguien en casa una persona en el encuadre es lo normal.
+//   - La sirena no suena salvo con ONVIF_SIRENA=movimiento o persona y el sistema armado: se marca la alarma
+//     y suena la salida audible ONVIF_SIRENA_S segundos (ver activarAlarmaCamara en server.js).
+//     Una persona cuenta tambien como movimiento.
+//   - Combinacion recomendada: ONVIF_SIRENA=persona y ONVIF_ALERTAR=persona,movimiento (el movimiento solo
+//     avisa, como maximo una vez cada ONVIF_COOLDOWN_MOVIMIENTO_S).
+//   - ONVIF_RETARDO_SALIDA_S: tras armar no se avisa ni suena nada, para no disparar con el residente saliendo.
 
 const { pool } = require('./db');
 const auth = require('./auth');
@@ -72,10 +58,7 @@ const TEXTOS = {
 let servicio = null;
 let cfgActual = null;
 
-/**
- * Arranca el servicio. Recibe del backend lo que necesita para avisar y pedir la foto,
- * en vez de importarlo, para no depender de server.js.
- */
+// Recibe del backend lo que necesita para avisar y pedir la foto, para no depender de server.js.
 function iniciar({ notificar, solicitarFoto, activarAlarma = null, config = leerConfig(), consulta = pool }) {
   cfgActual = config;
   if (!config.activo) {
@@ -164,7 +147,6 @@ function iniciar({ notificar, solicitarFoto, activarAlarma = null, config = leer
   });
   servicio.iniciar();
 
-  // Limpieza de eventos antiguos, una vez por hora
   const limpiar = () => consulta.query(`DELETE FROM eventos_camara WHERE creado_en < NOW() - ($1 || ' days')::interval`, [String(config.diasEventos)])
     .catch((e) => console.error('[onvif] No se pudieron limpiar los eventos antiguos:', e.message));
   limpiar();
@@ -177,7 +159,6 @@ function iniciar({ notificar, solicitarFoto, activarAlarma = null, config = leer
 }
 
 function montarRutas(app) {
-  // Historial de eventos de la camara
   app.get('/camara/eventos', async (req, res) => {
     const viviendaId = req.query.vivienda_id;
     const limite = Math.min(Number(req.query.limite) || 50, 200);

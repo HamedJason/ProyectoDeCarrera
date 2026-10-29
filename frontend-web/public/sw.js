@@ -1,8 +1,4 @@
-/*
- * Service worker de la aplicacion.
- * Su unica funcion es recibir las notificaciones push del servidor y mostrarlas,
- * aunque la aplicacion este cerrada. No guarda nada en cache.
- */
+// Service worker: recibe las notificaciones push del servidor y las muestra aunque la aplicacion este cerrada. No guarda nada en cache.
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 

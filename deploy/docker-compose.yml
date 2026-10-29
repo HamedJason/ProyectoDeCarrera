@@ -1,17 +1,7 @@
-# Despliegue de la prueba de concepto en el VPS.
-#
-# Levanta tres servicios:
-#   db       PostgreSQL, con los datos en un volumen para que sobrevivan a reinicios
-#   backend  la API de Node
-#   caddy    servidor web que publica el backend y gestiona el certificado HTTPS
-#
-# Caddy solicita y renueva el certificado de Let's Encrypt automáticamente.
-# No hay que ejecutar certbot ni programar renovaciones.
-#
-# Uso:
-#   docker compose up -d      levantar
-#   docker compose logs -f    ver registros
-#   docker compose down       detener
+# Despliegue en el VPS: db (PostgreSQL con los datos en un volumen) y backend (API de Node).
+# El VPS ya tiene un proxy en los puertos 80 y 443, asi que no hay Caddy: docker-compose.proxy.yml conecta
+# el backend a la red de ese proxy (ver desplegar_vps.sh).
+# Uso: docker compose up -d (levantar), docker compose logs -f (ver registros), docker compose down (detener).
 
 services:
   db:
@@ -111,18 +101,8 @@ services:
     networks:
       - alarma
 
-# Nota sobre HTTPS.
-#
-# El servidor ya tiene otro proyecto ocupando los puertos 80 y 443, por lo que no
-# se incluye Caddy en este despliegue. Let's Encrypt valida el dominio a través
-# del puerto 80, así que no es posible emitir un certificado mientras ese puerto
-# esté en uso por otro servicio.
-#
-# La prueba de concepto opera entonces sobre HTTP, protegida por el token del
-# dispositivo. La actividad no exige cifrado en esta etapa y la estrategia de
-# seguridad se define en talleres posteriores. El archivo Caddyfile se conserva
-# en esta carpeta para cuando el puerto 80 quede disponible o se integre este
-# servicio al servidor web existente.
+# No hay servicio Caddy: otro proyecto ocupa los puertos 80 y 443 y el HTTPS lo da su proxy
+# (docker-compose.proxy.yml). El Caddyfile queda para un servidor con el puerto 80 libre.
 
 volumes:
   datos_postgres:

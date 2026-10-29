@@ -1,10 +1,10 @@
-/* ---- Boton "Cuenta" de la barra superior ---- */
+/* Boton "Cuenta" de la barra superior */
 .cuenta-btn { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 4px 12px 4px 4px; background: var(--papel); border: 1.5px solid var(--borde-control); border-radius: 999px; font-weight: 700; font-size: 14px; }
 .cuenta-btn:hover { background: var(--pino-claro); }
 .avatar { display: grid; place-items: center; width: 34px; height: 34px; flex: none; border-radius: 50%; background: var(--pino); color: var(--sobre-pino); font-weight: 800; font-size: 16px; }
 .barra-der { display: flex; align-items: center; gap: 12px; min-width: 0; }
 
-/* ---- Panel lateral: la hoja modal se pega al borde derecho ---- */
+/* Panel lateral: la hoja modal se pega al borde derecho */
 dialog.hoja.lateral {
   position: fixed; inset: 0 0 0 auto; margin: 0; width: min(360px, 100vw); max-width: 100vw; height: 100dvh; max-height: 100dvh;
   border-radius: 22px 0 0 22px; border-width: 0 0 0 1px; overflow-y: auto;

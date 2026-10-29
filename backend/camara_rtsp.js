@@ -1,24 +1,11 @@
-/*
- * Agente de la camara MC210 (RTSP bajo demanda).
- *
- * El backend ya tiene un protocolo para camaras (camara.js): la camara pregunta
- * si hay tareas y responde con fotos o cuadros de video. Este modulo hace ese
- * papel para la MC210, que no lo habla por si sola: pregunta al propio backend
- * (por 127.0.0.1, con el token del dispositivo) y, cuando hay una tarea, le
- * pide el video a la camara con ffmpeg.
- *
- *   foto  -> un cuadro por cada foto pedida (ffmpeg corre un segundo y termina)
- *   vivo  -> cuadros JPEG continuos hasta que el servidor diga que pare
- *
- * RTSP NUNCA queda abierto: ffmpeg solo existe mientras dura una tarea. Mientras
- * no hay tareas lo unico que se hace es preguntar cada ~20 s y comprobar con una
- * conexion TCP corta que la camara responde, para no figurar "en linea" si esta
- * apagada. Esa presencia es la que usa el backend para decidir si pide fotos.
- *
- * Se reutiliza el protocolo y no la logica interna para conservar, sin
- * duplicarlos, los topes de espacio, las cuotas de vista en vivo y la
- * autenticacion del dispositivo.
- */
+// Agente de la camara MC210 (RTSP bajo demanda). La MC210 no habla el protocolo de camaras de camara.js,
+// asi que este modulo pregunta al propio backend (por 127.0.0.1, con el token del dispositivo) y, ante una
+// tarea, pide el video con ffmpeg: foto = un cuadro (ffmpeg corre un segundo); vivo = cuadros JPEG continuos
+// hasta que el servidor diga que pare.
+// RTSP nunca queda abierto: sin tareas solo pregunta cada ~20 s y comprueba con una conexion TCP corta que
+// la camara responde, para no figurar "en linea" si esta apagada.
+// Reutiliza el protocolo (y no su logica) para conservar los topes de espacio, las cuotas de vista en vivo
+// y la autenticacion del dispositivo.
 
 const net = require('net');
 const { spawn } = require('child_process');
@@ -152,8 +139,6 @@ class AgenteCamara {
     }
   }
 
-  // ---------- Fotos ----------
-
   /** Un cuadro JPEG de la camara. ffmpeg se lanza, saca un cuadro y termina. */
   capturarJpeg(ruta) {
     const args = ['-nostdin', '-loglevel', 'error', ...this.entrada(ruta), '-frames:v', '1', '-q:v', '3', '-f', 'image2pipe', '-vcodec', 'mjpeg', 'pipe:1'];
@@ -195,8 +180,6 @@ class AgenteCamara {
       if (restantes > 0) await esperar(tarea.intervalo_ms || 700, this.parar.signal);
     }
   }
-
-  // ---------- Vista en vivo ----------
 
   async hacerVivo(tarea) {
     const cfg = this.cfg;

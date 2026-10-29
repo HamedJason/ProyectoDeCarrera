@@ -1,8 +1,5 @@
-/*
- * Apariencia: tema (claro, oscuro o el del sistema) y movimiento (normal o
- * reducido). Se guarda en este dispositivo y se aplica sobre <html> con
- * data-tema y data-movimiento, que es lo que leen los estilos.
- */
+// Apariencia: tema (claro, oscuro o el del sistema) y movimiento (normal o reducido). Se guarda en este dispositivo
+// y se aplica en <html> con data-tema y data-movimiento, que son los que leen los estilos.
 import { ref } from 'vue';
 
 const COLORES_BARRA = { claro: '#E6EBE7', oscuro: '#262624' };

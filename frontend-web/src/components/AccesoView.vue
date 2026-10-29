@@ -1,4 +1,3 @@
-<!-- Pantalla de acceso: iniciar sesion o crear cuenta -->
 <script setup>
 import { reactive, ref, watch } from 'vue';
 import { pantalla, acceso } from '../stores/sesion.js';

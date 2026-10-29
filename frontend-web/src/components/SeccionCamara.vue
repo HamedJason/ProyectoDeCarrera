@@ -1,4 +1,3 @@
-<!-- Seccion de la camara: eventos de deteccion y galeria de fotos -->
 <script setup>
 import { computed } from 'vue';
 import {

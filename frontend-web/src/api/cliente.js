@@ -1,7 +1,4 @@
-/*
- * Cliente HTTP de la aplicacion. La pagina se sirve desde el mismo backend,
- * asi que todas las rutas son relativas al mismo origen.
- */
+// Cliente HTTP de la aplicacion. La pagina se sirve desde el mismo backend, asi que las rutas son relativas.
 export const TIEMPO_LIMITE_MS = 8000;
 
 // Se lanza cuando el servidor responde 401: ya se mostro la pantalla de acceso
@@ -57,11 +54,7 @@ export async function enviarJson(ruta, metodo, cuerpo) {
   }
 }
 
-/*
- * Traduce el fallo a un mensaje que el usuario pueda accionar.
- * El navegador entrega textos internos en ingles como "Failed to fetch",
- * que no dicen nada a quien usa la aplicacion.
- */
+// Traduce el fallo a un mensaje accionable: el navegador entrega textos internos en ingles como "Failed to fetch".
 export function mensajeDeError(e) {
   if (e.name === 'AbortError') {
     return 'El servidor no respondió a tiempo. Revisa tu conexión a Internet.';

@@ -1,14 +1,7 @@
-/*
- * Prueba de extremo a extremo: el servidor REAL (server.js) contra un PostgreSQL
- * en memoria (PGlite), con la camara ONVIF simulada y ffmpeg real como fuente de
- * imagen. Comprueba el camino completo de una deteccion:
- *
- *   camara ONVIF -> servicio ONVIF -> evento en la base -> aviso -> tarea de foto
- *   -> agente de la camara (ffmpeg) -> fotos guardadas -> visibles por la API
- *
- * Necesita las dependencias de desarrollo (@electric-sql/pglite y
- * @electric-sql/pglite-socket). Sin ellas, la prueba se omite.
- */
+// Prueba de extremo a extremo con el servidor REAL (server.js), PostgreSQL en memoria (PGlite), la camara ONVIF
+// simulada y ffmpeg real como fuente de imagen. Recorre una deteccion completa: servicio ONVIF -> evento en la
+// base -> aviso -> tarea de foto -> agente de la camara -> fotos guardadas -> visibles por la API.
+// Necesita @electric-sql/pglite y @electric-sql/pglite-socket (dependencias de desarrollo); sin ellos se omite.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');

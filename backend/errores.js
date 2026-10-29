@@ -1,9 +1,5 @@
-/*
- * Errores internos. El texto de un fallo de PostgreSQL o de Node puede revelar
- * nombres de tablas, columnas o rutas, asi que no se devuelve al cliente salvo
- * en la etapa de pruebas (MODO_PRUEBAS=true). Siempre queda en el registro del
- * servidor para poder diagnosticarlo.
- */
+// El texto de un error de PostgreSQL o Node puede revelar tablas, columnas o rutas: solo se
+// devuelve con MODO_PRUEBAS=true. Siempre queda en el registro del servidor.
 const MODO_PRUEBAS = String(process.env.MODO_PRUEBAS || '').toLowerCase() === 'true';
 
 function detalleError(e) {

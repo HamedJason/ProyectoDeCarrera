@@ -1,4 +1,3 @@
-/* ---- Tarjeta de sensor ---- */
 .tarjeta {
   position: relative; display: flex; flex-direction: column; text-align: left;
   width: 100%; padding: 0 0 13px; cursor: pointer; overflow: hidden;

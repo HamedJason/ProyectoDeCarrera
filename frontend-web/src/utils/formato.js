@@ -1,4 +1,3 @@
-// Formato de fechas y tiempos para mostrar en pantalla
 
 export function formatearFecha(iso) {
   if (!iso) return '';

@@ -1,16 +1,4 @@
-/*
- * Proyecto de Carrera - Sistema escalable de seguridad residencial
- * Taller 5: Prueba de concepto reducida
- *
- * Backend minimo desplegado en la nube.
- *
- * Responsabilidades demostradas en esta etapa:
- *   - Recibir un tipo de dato proveniente del sistema embebido
- *   - Validar los campos indispensables y responder de forma comprensible
- *   - Registrar la informacion en PostgreSQL
- *   - Permitir que el frontend consulte la informacion
- *   - Mantener el estado del actuador para el control remoto basico
- */
+// Backend de Sentinel Home: API REST, avisos push y la interfaz web.
 
 const express = require('express');
 const cors = require('cors');
@@ -27,30 +15,24 @@ const { exigirMiembro, autenticarDispositivo, rechazarDispositivo, quien } = aut
 
 const app = express();
 const PUERTO = process.env.PORT || 3000;
-// Token global de la prueba de concepto. Solo lo aceptan las viviendas que
-// todavia no tienen token propio (ver auth.js). Si el firmware ya instalado usa
-// este valor, sigue funcionando hasta que se genere el token de la vivienda.
+// DEVICE_TOKEN: token global de la prueba de concepto. Solo lo aceptan las
+// viviendas que aun no tienen token propio (ver auth.js).
 if (!process.env.DEVICE_TOKEN) {
   console.warn('Advertencia: DEVICE_TOKEN no esta definido. Los dispositivos solo podran usar el token de su vivienda.');
 }
 
-// Notificaciones push a traves de ntfy. Si NTFY_TOPIC esta vacio, el servicio
-// funciona igual pero no envia avisos. Quien conozca el nombre del tema puede
-// leer los avisos, por eso debe ser largo y dificil de adivinar.
+// Sin NTFY_TOPIC no se envian avisos por ntfy.
 const NTFY_URL = (process.env.NTFY_URL || 'https://ntfy.sh').replace(/\/+$/, '');
 const NTFY_TOPIC = process.env.NTFY_TOPIC || '';
-// El nombre del tema es lo unico que protege los avisos de ntfy: cualquiera que
-// lo conozca puede leerlos o publicar en el.
+// Quien conozca el tema de ntfy puede leer y publicar avisos, por eso debe ser largo y aleatorio.
 if (NTFY_TOPIC && NTFY_TOPIC.length < 20) {
   console.warn('[Seguridad] NTFY_TOPIC es corto y facil de adivinar. Usa uno largo y aleatorio (20 caracteres o mas).');
 }
 
-// Habilita funciones que solo tienen sentido durante las pruebas, como borrar
-// el historial. Debe estar apagado cuando el sistema quede en uso real.
+// Habilita funciones de prueba, como borrar el historial. Apagar en uso real.
 const MODO_PRUEBAS = String(process.env.MODO_PRUEBAS || '').toLowerCase() === 'true';
 
-// El servidor va detras del proxy inverso (Caddy), que indica si la conexion
-// original era HTTPS. Sin esto la cookie de sesion no se marcaria como Secure.
+// Detras del proxy inverso; sin esto la cookie de sesion no se marca como Secure.
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
@@ -64,30 +46,20 @@ app.use((_req, res, next) => {
   next();
 });
 
-// La interfaz web se sirve desde este mismo servidor, asi que no hace falta CORS.
-// Solo se permite a otros origenes si se listan en CORS_ORIGEN (separados por coma).
+// La interfaz se sirve desde este servidor, por eso CORS queda cerrado salvo
+// los origenes de CORS_ORIGEN (separados por coma).
 const ORIGENES_CORS = (process.env.CORS_ORIGEN || '').split(',').map((o) => o.trim()).filter(Boolean);
 app.use(cors({ origin: ORIGENES_CORS.length ? ORIGENES_CORS : false }));
 app.use(express.json({ limit: '100kb' }));
 app.use(auth.cargarSesion);
 app.use(auth.verificarOrigen);
 
-// Registro simple de peticiones, util durante las pruebas del taller
 app.use((req, _res, next) => {
   console.log(`${new Date().toISOString()} ${req.method} ${req.originalUrl}`);
   next();
 });
 
-// ===================== Validacion =====================
-
-/*
- * Valida el cuerpo de una medicion.
- * Devuelve un arreglo de errores. Si esta vacio, el dato es aceptable.
- *
- * Se validan por separado los campos ausentes y los campos con tipo incorrecto,
- * porque durante las pruebas conviene distinguir un dato incompleto de un dato
- * mal formado. Esa distincion tambien hace comprensible la respuesta de error.
- */
+// Devuelve los errores del cuerpo; arreglo vacio si el dato es aceptable.
 function validarMedicion(cuerpo) {
   const errores = [];
 
@@ -118,9 +90,6 @@ function validarMedicion(cuerpo) {
   return errores;
 }
 
-// ===================== Endpoints =====================
-
-// Verificacion de que el servicio esta vivo. Sirve como evidencia del despliegue.
 app.get('/salud', async (_req, res) => {
   try {
     const r = await pool.query('SELECT NOW() AS hora');
@@ -135,12 +104,7 @@ app.get('/salud', async (_req, res) => {
   }
 });
 
-/*
- * POST /mediciones
- * Registra una medicion enviada por el sistema embebido.
- * La marca de tiempo la asigna el backend, tal como permite la actividad,
- * porque el ESP32 no cuenta con reloj de tiempo real en esta etapa.
- */
+// La marca de tiempo la asigna el backend porque el ESP32 no tiene reloj de tiempo real.
 app.post('/mediciones', async (req, res) => {
   const disp = await autenticarDispositivo(req).catch(() => null);
   if (!disp) return rechazarDispositivo(res);
@@ -193,10 +157,6 @@ app.post('/mediciones', async (req, res) => {
   }
 });
 
-/*
- * GET /mediciones
- * Devuelve el historico para el frontend, de la mas reciente a la mas antigua.
- */
 app.get('/mediciones', async (req, res) => {
   const limite = Math.min(Number(req.query.limite) || 50, 200);
   const viviendaId = req.query.vivienda_id;
@@ -230,10 +190,6 @@ app.get('/mediciones', async (req, res) => {
   }
 });
 
-/*
- * GET /mediciones/ultima
- * Devuelve unicamente el dato mas reciente, para la tarjeta principal del frontend.
- */
 app.get('/mediciones/ultima', async (req, res) => {
   const viviendaId = req.query.vivienda_id;
   if (!(await exigirMiembro(req, res, viviendaId))) return;
@@ -261,8 +217,6 @@ app.get('/mediciones/ultima', async (req, res) => {
 });
 
 
-// ===================== Sensores =====================
-
 const TIPOS_SENSOR = ['puerta', 'ventana', 'movimiento'];
 
 // Un contacto magnetico reporta "estado_puerta" y puede ser puerta o ventana;
@@ -279,9 +233,7 @@ function nombrePorOmision(tipo, zona) {
   return `${tipo === 'ventana' ? 'Ventana' : 'Puerta'}${lugar}`;
 }
 
-// Nombre provisional de un sensor detectado solo, hasta que el residente lo
-// renombre. Incluye el pin o la parte final del identificador para poder
-// distinguir varios contactos de un mismo nodo.
+// Nombre provisional hasta que el residente lo renombre; lleva el pin para distinguir contactos del mismo nodo.
 function nombreAutomatico(tipo, sensorId, nodoId, zona) {
   let cola = String(sensorId);
   if (nodoId && cola.startsWith(nodoId + '-')) cola = cola.slice(nodoId.length + 1);
@@ -289,11 +241,7 @@ function nombreAutomatico(tipo, sensorId, nodoId, zona) {
   return `${base} ${cola}`.slice(0, 60);
 }
 
-/*
- * Da de alta un sensor la primera vez que reporta. La migracion desde las
- * mediciones antiguas solo ocurre cuando la tabla esta vacia, para que un
- * sensor eliminado por el residente no reaparezca por su historial.
- */
+// Da de alta el sensor la primera vez que reporta, salvo que el residente lo haya eliminado.
 async function registrarSensorSiNuevo(viviendaId, sensorId, nodoId, variable, zona, confirmado = false) {
   const tipo = tipoPorVariable(variable);
   if (!tipo) return;
@@ -309,10 +257,7 @@ async function registrarSensorSiNuevo(viviendaId, sensorId, nodoId, variable, zo
   );
 }
 
-/*
- * Anota que un nodo sigue vivo. hace_s permite que el concentrador indique
- * cuanto tiempo atras escucho al nodo, porque reporta por lotes.
- */
+// hace_s: segundos desde que el concentrador escucho al nodo (reporta por lotes).
 async function tocarNodo(viviendaId, nodoId, haceS, rssi) {
   const id = limpiarTexto(nodoId, 40);
   if (!id) return;
@@ -367,10 +312,6 @@ async function listarSensores(viviendaId, sensorDbId) {
 
 const limpiarTexto = auth.limpiarTexto;
 
-/*
- * GET /sensores
- * Lista los sensores de la vivienda con su ultimo valor y ultima deteccion.
- */
 app.get('/sensores', async (req, res) => {
   const viviendaId = req.query.vivienda_id;
   if (!(await exigirMiembro(req, res, viviendaId))) return;
@@ -468,8 +409,7 @@ app.delete('/sensores/:id', async (req, res) => {
     const r = await pool.query('DELETE FROM sensores WHERE id = $1 RETURNING vivienda_id, sensor_id, nombre', [id]);
     if (r.rowCount === 0) return res.status(404).json({ ok: false, mensaje: 'Sensor no encontrado.' });
     const f = r.rows[0];
-    // valor_anterior guarda el identificador para que el sensor no se vuelva a
-    // registrar solo si el nodo sigue reportandolo. Solo un alta manual lo revive.
+    // valor_anterior guarda el sensor_id: evita que se vuelva a registrar solo; solo un alta manual lo revive.
     await registrarAccion(f.vivienda_id, 'sensor_eliminado', f.sensor_id, f.nombre, quien(req));
     return res.json({ ok: true, mensaje: 'Sensor eliminado.' });
   } catch (e) {
@@ -477,14 +417,7 @@ app.delete('/sensores/:id', async (req, res) => {
   }
 });
 
-// ===================== Estado de la vivienda =====================
-
-/*
- * Devuelve el estado de una vivienda, creandolo con valores por omision la
- * primera vez que se consulta. De esta forma una vivienda nueva no requiere
- * ningun alta previa, lo que sostiene el requisito de escalabilidad por
- * configuracion: basta con que un nodo empiece a reportar con su identificador.
- */
+// Crea el estado con valores por omision la primera vez que se consulta, asi una vivienda nueva no necesita alta previa.
 const COLUMNAS_ESTADO =
   'vivienda_id, armado, modo_silencioso, actuador_activo, alarma_activa, alarma_motivo, alarma_sensor, actualizado_en';
 
@@ -499,9 +432,6 @@ async function obtenerEstado(viviendaId) {
   return r.rows[0];
 }
 
-/*
- * Traduce lo que reporta el nodo a un texto comprensible para el residente.
- */
 function describirMotivo(variable, zona) {
   const lugar = zona ? ` en ${zona}` : '';
   if (variable === 'estado_puerta') return `Puerta abierta${lugar}`;
@@ -509,18 +439,8 @@ function describirMotivo(variable, zona) {
   return `Actividad detectada${lugar}`;
 }
 
-// ===================== Notificaciones push =====================
-
-/*
- * Web Push: el servidor envia el aviso al servicio de push del telefono
- * (Apple en iOS, Google en Android) y el sistema lo muestra aunque la app
- * este cerrada. Requiere HTTPS y que el navegador haya guardado una
- * suscripcion (tabla suscripciones_push).
- *
- * Las claves VAPID identifican a este servidor ante esos servicios. Pueden
- * venir de las variables VAPID_PUBLIC_KEY y VAPID_PRIVATE_KEY; si no existen
- * se generan una vez y se guardan en la base de datos.
- */
+// Web Push. Las claves VAPID vienen de VAPID_PUBLIC_KEY y VAPID_PRIVATE_KEY;
+// si faltan se generan una vez y se guardan en la base de datos.
 let claveVapidPublica = '';
 let pushListo = false;
 
@@ -576,14 +496,9 @@ async function enviarPush(sub, carga) {
   }
 }
 
-/*
- * Medicion de entrega. Cada aviso lleva un identificador; cuando el telefono lo
- * recibe, su service worker avisa a POST /push/recibido y aqui se calcula el
- * tiempo total (servidor -> Apple/Google -> telefono) con el reloj del servidor,
- * sin depender de que los relojes coincidan. Sirve para saber si una demora
- * esta en el hub, en el servidor o en la entrega al telefono.
- */
-const pushEnviados = new Map();   // id -> { t0, vivienda, destinos }
+// Mide la entrega: cada aviso lleva un id que el service worker confirma en
+// POST /push/recibido; el tiempo se calcula con el reloj del servidor.
+const pushEnviados = new Map();
 function recordarEnvio(id, viviendaId, destinos) {
   pushEnviados.set(id, { t0: Date.now(), vivienda: viviendaId, destinos, recibidos: 0 });
   for (const [k, v] of pushEnviados) {
@@ -593,8 +508,7 @@ function recordarEnvio(id, viviendaId, destinos) {
 
 async function notificarPush(viviendaId, titulo, mensaje, etiqueta, extra = {}) {
   if (!pushListo) return;
-  // Solo reciben el aviso quienes siguen siendo miembros (o dispositivos
-  // suscritos antes de que existieran las cuentas)
+  // Solo reciben el aviso los miembros actuales (o dispositivos suscritos antes de las cuentas).
   const r = await pool.query(
     `SELECT endpoint, p256dh, auth FROM suscripciones_push
       WHERE vivienda_id = $1
@@ -607,8 +521,7 @@ async function notificarPush(viviendaId, titulo, mensaje, etiqueta, extra = {}) 
   recordarEnvio(idAviso, viviendaId, r.rows.length);
   const t0 = Date.now();
   const resultados = await Promise.all(r.rows.map((s) => enviarPush(s, carga)));
-  // El tiempo que tarda el servicio de Apple o Google en aceptar el aviso ayuda
-  // a saber si un retraso esta en este servidor o en la entrega al telefono.
+  // Mide cuanto tarda Apple o Google en aceptar el aviso, para ubicar retrasos.
   console.log(`Push ${idAviso} enviado a ${resultados.filter(Boolean).length} de ${r.rows.length} dispositivo(s); el servicio de push lo acepto en ${Date.now() - t0} ms.`);
 }
 
@@ -625,11 +538,7 @@ app.post('/push/recibido', (req, res) => {
   res.status(204).end();
 });
 
-/*
- * Envia un aviso por Web Push y, si NTFY_TOPIC esta definido, tambien por ntfy.
- * No se espera su resultado dentro de la peticion: si el servicio de avisos
- * falla o tarda, la alarma no debe retrasarse ni fallar por eso.
- */
+// No se espera el resultado: si el servicio de avisos falla o tarda, la alarma no se ve afectada.
 function notificar(viviendaId, titulo, mensaje, prioridad = 5, etiquetas = ['rotating_light']) {
   notificarPush(viviendaId, titulo, mensaje, 'alarma').catch((e) => console.error('Push:', e.message));
   if (!NTFY_TOPIC) return;
@@ -646,16 +555,12 @@ function notificar(viviendaId, titulo, mensaje, prioridad = 5, etiquetas = ['rot
     .catch((e) => console.error('No se pudo enviar la notificacion ntfy:', e.message));
 }
 
-// ===================== Concentrador y nodos =====================
-
 const UMBRAL_CONCENTRADOR_MS = 90000;   // sin consultas durante este tiempo se considera desconectado
 const UMBRAL_NODO_S = 120;              // el nodo emite latido cada 30 s; 4 perdidos se consideran sin senal
 const ultimoRegistroConcentrador = new Map();
 
-/*
- * El concentrador consulta /estado cada 2 s. Para no escribir en la base de
- * datos con cada consulta, se anota como maximo una vez cada 20 s.
- */
+// El concentrador consulta /estado cada 2 s; se anota como maximo una vez cada
+// 20 s para no escribir en la base en cada consulta.
 function marcarConcentrador(viviendaId) {
   const ahora = Date.now();
   if (ahora - (ultimoRegistroConcentrador.get(viviendaId) || 0) < 20000) return;
@@ -664,14 +569,8 @@ function marcarConcentrador(viviendaId) {
     .catch((e) => console.error('No se pudo anotar al concentrador:', e.message));
 }
 
-/*
- * POST /nodos/latido
- * El concentrador reporta por lotes los nodos que escucha y los sensores que
- * cada uno declara. Con esto:
- *   - los sensores nuevos aparecen en la aplicacion sin que nadie los active
- *   - la aplicacion sabe si un nodo sigue vivo (RF-25)
- * No inserta mediciones, para no llenar el historial con lecturas repetidas.
- */
+// El concentrador reporta por lotes los nodos que escucha y los sensores que declara.
+// No inserta mediciones, para no llenar el historial de lecturas repetidas.
 app.post('/nodos/latido', async (req, res) => {
   const disp = await autenticarDispositivo(req).catch(() => null);
   if (!disp) return rechazarDispositivo(res);
@@ -705,12 +604,8 @@ app.post('/nodos/latido', async (req, res) => {
   }
 });
 
-/*
- * Revisa cada 30 s si algun concentrador o nodo dejo de comunicarse y avisa una
- * sola vez por cada interrupcion. Un nodo solo se da por perdido si el
- * concentrador sigue conectado; si el concentrador cayo, el silencio de los
- * nodos es consecuencia y no se avisa por separado.
- */
+// Cada 30 s revisa concentradores y nodos que dejaron de comunicarse y avisa una vez por interrupcion.
+// Un nodo solo se da por perdido si el concentrador sigue conectado; si el concentrador cayo, el silencio es consecuencia.
 async function vigilarDispositivos() {
   try {
     const hubs = await pool.query(
@@ -738,10 +633,6 @@ async function vigilarDispositivos() {
   }
 }
 
-/*
- * Registra una accion del usuario sobre el sistema.
- * Responde al requisito de trazabilidad: permite saber quien cambio que y cuando.
- */
 async function registrarAccion(viviendaId, accion, anterior, nuevo, usuario) {
   await pool.query(
     `INSERT INTO acciones (vivienda_id, accion, valor_anterior, valor_nuevo, usuario)
@@ -750,22 +641,8 @@ async function registrarAccion(viviendaId, accion, anterior, nuevo, usuario) {
   );
 }
 
-/*
- * Alarma disparada por la camara (eventos ONVIF, ver eventos_camara.js).
- *
- * La sirena la decide localmente el concentrador cuando un nodo le avisa; el servidor solo
- * refleja ese estado. Para que suene por una deteccion de la camara se usa lo unico que el
- * concentrador SI obedece del servidor: la salida audible (actuador_activo). Por eso se
- * marca la alarma Y se enciende la salida, y se apaga sola pasados "segundos".
- *
- * Para que la salida no pueda quedar encendida por error:
- *   - un temporizador la apaga (y se cancela si la alarma se apaga o el sistema se desarma
- *     desde la aplicacion, ver POST /estado);
- *   - la alarma queda marcada con alarma_sensor = 'camara'; si el servidor se reinicia
- *     mientras suena, al arrancar se apaga todo lo marcado asi (recuperarAlarmasCamara).
- * El concentrador consulta el estado cada pocos segundos, asi que la sirena tarda ese
- * intervalo en reaccionar.
- */
+// El concentrador solo obedece al servidor en la salida audible (actuador_activo), asi que una alarma de camara enciende esa salida.
+// Un temporizador la apaga; si el servidor se reinicia, recuperarAlarmasCamara apaga las marcadas con alarma_sensor = 'camara'.
 const sirenasCamara = new Map();   // viviendaId -> { temporizador, encendioSalida }
 
 async function activarAlarmaCamara(viviendaId, texto, segundos) {
@@ -804,8 +681,8 @@ async function activarAlarmaCamara(viviendaId, texto, segundos) {
   return { avisado: true, nota: null };
 }
 
-// Fin por tiempo: apaga la salida que se encendio y da por terminada la alarma (si sigue siendo la de la camara).
-// Todo en una sola sentencia, para que no haya un instante con la sirena apagada y la alarma aun marcada.
+// Fin por tiempo: apaga la salida y cierra la alarma de la camara en una sola
+// sentencia, para que no quede la sirena apagada con la alarma aun marcada.
 async function terminarAlarmaCamara(viviendaId) {
   const s = sirenasCamara.get(viviendaId);
   if (!s) return;
@@ -828,7 +705,7 @@ async function terminarAlarmaCamara(viviendaId) {
   if (eraDeCamara) await registrarAccion(viviendaId, 'alarma_terminada', true, false, 'camara');
 }
 
-// Al arrancar: una alarma de la camara que seguia sonando cuando se reinicio el servidor ya no tiene temporizador
+// Al arrancar: sin temporizador, una alarma de camara que seguia sonando tras un reinicio se apaga.
 async function recuperarAlarmasCamara() {
   const r = await pool.query(
     `UPDATE estado_vivienda SET alarma_activa = false, alarma_motivo = NULL, alarma_sensor = NULL, actuador_activo = false, actualizado_en = NOW()
@@ -839,11 +716,6 @@ async function recuperarAlarmasCamara() {
   }
 }
 
-/*
- * GET /estado
- * Lo consultan tanto el concentrador como la aplicacion.
- * El concentrador lo usa para decidir si un evento debe disparar la sirena.
- */
 app.get('/estado', async (req, res) => {
   try {
     // El concentrador consulta con su token; la aplicacion, con su sesion
@@ -869,12 +741,7 @@ app.get('/estado', async (req, res) => {
   }
 });
 
-/*
- * POST /estado
- * La aplicacion cambia el armado, el modo silencioso o la salida audible, y
- * puede apagar una alarma que este sonando.
- * Se aceptan cambios parciales: lo que no venga en la peticion no se modifica.
- */
+// Acepta cambios parciales: lo que no venga en la peticion no se modifica.
 app.post('/estado', async (req, res) => {
   const { vivienda_id, armado, modo_silencioso, actuador_activo, alarma_activa } = req.body || {};
   const usuario = quien(req);
@@ -959,31 +826,15 @@ app.post('/estado', async (req, res) => {
   }
 });
 
-/*
- * POST /alarma
- * Lo usa el nodo para avisar que una alarma empezo o termino de sonar.
- * Requiere el token del dispositivo, a diferencia de /estado, porque solo un
- * sensor debe poder declarar una alarma.
- *
- * Campos: vivienda_id, activa, y opcionalmente nodo_id, sensor_id, motivo (variable que
- * disparo, por ejemplo "estado_puerta"), zona y silenciosa.
- *
- * Con silenciosa = true el nodo dispara sin sirena por el modo silencioso: se
- * registra y se notifica, pero no se marca alarma activa porque no hay nada
- * que apagar.
- *
- * Si el nodo avisa una alarma pero el sistema ya no esta armado (por ejemplo
- * el usuario lo desarmo justo en ese instante), no se marca la alarma. La
- * respuesta sigue siendo correcta para que el nodo no reintente sin fin.
- */
+// Con silenciosa = true se registra y se notifica sin marcar alarma activa (no hay sirena que apagar).
+// Si el sistema ya no esta armado no se marca, pero se responde bien para que el nodo no reintente sin fin.
 app.post('/alarma', async (req, res) => {
   const disp = await autenticarDispositivo(req).catch(() => null);
   if (!disp) return rechazarDispositivo(res);
   const vivienda_id = disp.viviendaId;
 
   const { activa, nodo_id, motivo, zona, silenciosa, sensor_id } = req.body || {};
-  // El concentrador indica cuanto tardo en avisar desde que detecto el evento.
-  // Con esto se separa la demora del dispositivo de la del servidor o el telefono.
+  // Retraso del concentrador desde que detecto el evento, para separar su demora de la del servidor o el telefono.
   const retrasoHub = Number((req.body || {}).retraso_ms);
   if (activa === true && Number.isFinite(retrasoHub)) {
     console.log(`Alarma recibida: el concentrador tardo ${Math.round(retrasoHub)} ms en avisar desde que detecto el evento.`);
@@ -1040,14 +891,7 @@ app.post('/alarma', async (req, res) => {
   }
 });
 
-/*
- * POST /limpiar
- * Borra el historial de una vivienda. Existe solo para la etapa de pruebas, y
- * responde 403 salvo que el servidor tenga MODO_PRUEBAS=true. No borra el
- * estado de armado ni la configuracion, unicamente los registros.
- *
- * Campo "que": "mediciones", "acciones" o "todo" (por omision).
- */
+// Solo con MODO_PRUEBAS=true. "que": "mediciones", "acciones" o "todo" (por omision); no borra el estado ni la configuracion.
 app.post('/limpiar', async (req, res) => {
   if (!MODO_PRUEBAS) {
     return res.status(403).json({
@@ -1077,19 +921,10 @@ app.post('/limpiar', async (req, res) => {
   }
 });
 
-/*
- * GET /configuracion
- * Informa a la aplicacion que funciones estan habilitadas en este servidor,
- * para mostrar u ocultar controles como el de limpiar el historial.
- */
 app.get('/configuracion', (_req, res) => {
   res.json({ ok: true, modo_pruebas: MODO_PRUEBAS, notificaciones_push: pushListo || Boolean(NTFY_TOPIC), web_push: pushListo });
 });
 
-/*
- * GET /acciones
- * Bitacora de acciones del usuario, para la pantalla de historial.
- */
 app.get('/acciones', async (req, res) => {
   const viviendaId = req.query.vivienda_id;
   const limite = Math.min(Number(req.query.limite) || 30, 200);
@@ -1109,13 +944,7 @@ app.get('/acciones', async (req, res) => {
   }
 });
 
-// ===================== Compatibilidad =====================
-
-/*
- * Los endpoints /comando se conservan porque el firmware de la prueba de
- * concepto los utiliza. Ahora leen y escriben sobre la misma tabla de estado,
- * de modo que no existan dos fuentes de verdad.
- */
+// Los endpoints /comando se conservan para el firmware de la prueba de concepto; usan la misma tabla de estado.
 app.get('/comando', async (req, res) => {
   try {
     let viviendaId;
@@ -1167,13 +996,6 @@ app.post('/comando', async (req, res) => {
   }
 });
 
-/*
- * Web Push: suscripcion de dispositivos.
- * GET  /push/clave     clave publica VAPID, que el navegador necesita para suscribirse
- * POST /push/suscribir guarda (o actualiza) la suscripcion de un dispositivo
- * POST /push/cancelar  elimina la suscripcion de un dispositivo
- * POST /push/prueba    envia una notificacion de prueba a un dispositivo
- */
 app.get('/push/clave', (_req, res) => {
   if (!pushListo) return res.status(503).json({ ok: false, mensaje: 'Las notificaciones push no estan disponibles en el servidor.' });
   res.json({ ok: true, clave: claveVapidPublica });
@@ -1230,8 +1052,6 @@ app.post('/push/prueba', auth.requiereSesion, async (req, res) => {
   }
 });
 
-// ===================== Cuentas, viviendas y camara =====================
-
 auth.montarRutas(app, {
   registrarAccion,
   borrarDatosVivienda: async (id) => {
@@ -1242,9 +1062,8 @@ auth.montarRutas(app, {
     }
   }
 });
-// Segundo aviso de una alarma: la misma notificacion (misma etiqueta) se
-// actualiza con la foto de la camara. En iPhone la imagen no se muestra en la
-// notificacion, pero el texto y el enlace a la app si llegan.
+// Segundo aviso de una alarma: reemplaza la notificacion (misma etiqueta) con la foto de la camara.
+// En iPhone la imagen no se muestra, pero el texto y el enlace a la app si llegan.
 function notificarFoto(viviendaId, fotoId, firma, tarea) {
   const imagen = { imagen: `/fotos/${fotoId}/imagen?t=${firma}` };
   // Foto por una deteccion de la camara (persona o movimiento): no es una alarma
@@ -1257,13 +1076,6 @@ function notificarFoto(viviendaId, fotoId, firma, tarea) {
 camara.montarRutas(app, { notificar, registrarAccion, notificarFoto });
 eventosCamara.montarRutas(app);
 
-// ===================== Frontend =====================
-
-/*
- * La aplicacion se sirve desde el mismo servicio que la API.
- * Esto evita configurar un despliegue aparte y hace que el origen sea el mismo,
- * por lo que el navegador no necesita permisos adicionales entre ambos.
- */
 app.use(express.static(path.join(__dirname, 'publico'), {
   // El service worker no debe quedar en cache para que las actualizaciones lleguen
   setHeaders: (res, ruta) => { if (ruta.endsWith('sw.js')) res.setHeader('Cache-Control', 'no-cache'); }
@@ -1273,14 +1085,11 @@ app.get('/', (_req, res) => {
   res.sendFile(path.join(__dirname, 'publico', 'index.html'));
 });
 
-// ===================== Arranque =====================
-
 app.use((req, res) => {
   res.status(404).json({ ok: false, mensaje: `Ruta no encontrada: ${req.method} ${req.originalUrl}` });
 });
 
-// Errores que Express no atrapa: un JSON mal formado o demasiado grande llega aqui.
-// Sin este manejador la respuesta seria una pagina HTML con la pila de errores.
+// Errores que Express no atrapa (JSON mal formado o demasiado grande); evita una pagina HTML con la pila.
 app.use((err, _req, res, _next) => {
   if (err && err.type === 'entity.parse.failed') {
     return res.status(400).json({ ok: false, mensaje: 'El cuerpo de la peticion no es un JSON valido.' });
@@ -1292,11 +1101,7 @@ app.use((err, _req, res, _next) => {
   return res.status(500).json({ ok: false, mensaje: 'Error interno del servidor.' });
 });
 
-/*
- * Las viviendas que ya existian como simple texto (por ejemplo "casa-001") se
- * dan de alta en la tabla viviendas. Quedan sin duenos hasta que se registre la
- * primera cuenta, que las hereda.
- */
+// Registra en viviendas las que existian como texto (p. ej. "casa-001"); la primera cuenta que se registre las hereda.
 async function migrarViviendas() {
   const r = await pool.query(
     `INSERT INTO viviendas (id, nombre)

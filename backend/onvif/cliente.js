@@ -1,24 +1,10 @@
-/*
- * Cliente ONVIF minimo: solo lo necesario para recibir eventos por PullPoint.
- *
- * Operaciones:
- *   GetSystemDateAndTime         hora de la camara (sin autenticacion)
- *   GetServices / GetCapabilities  direccion del servicio de eventos
- *   GetEventProperties           topics que la camara realmente publica
- *   CreatePullPointSubscription  crea la suscripcion
- *   PullMessages                 espera mensajes (long polling)
- *   Renew / Unsubscribe          mantiene o cierra la suscripcion
- *
- * Detalles que importan en este proyecto:
- *   - La camara esta detras del ESP32 (NAT), y sus respuestas traen su direccion
- *     INTERNA (192.168.x.x). Todas las direcciones devueltas se reescriben al
- *     host y puerto que si son alcanzables (el del tunel). Para el campo
- *     wsa:To se conserva la direccion original que dio la camara.
- *   - La autenticacion es WS-Security con PasswordDigest. El digest depende de
- *     la hora de la camara, asi que se corrige con la diferencia medida con
- *     GetSystemDateAndTime.
- *   - Se usa solo el fetch de Node y un lector de XML; no hay mas dependencias.
- */
+// Cliente ONVIF minimo: solo lo necesario para recibir eventos por PullPoint (GetSystemDateAndTime,
+// GetServices/GetCapabilities, GetEventProperties, CreatePullPointSubscription, PullMessages,
+// Renew y Unsubscribe).
+// La camara esta detras del ESP32 (NAT) y sus respuestas traen su direccion interna (192.168.x.x): se
+// reescriben al host y puerto alcanzables (el del tunel), salvo wsa:To, que conserva la original.
+// La autenticacion es WS-Security con PasswordDigest, que depende de la hora de la camara: se corrige
+// con la diferencia medida con GetSystemDateAndTime.
 
 const crypto = require('crypto');
 const { XMLParser } = require('fast-xml-parser');
@@ -68,9 +54,7 @@ const texto = (n) => (n == null ? '' : typeof n === 'object' ? String(n['#text']
 const lista = (n) => (n == null ? [] : Array.isArray(n) ? n : [n]);
 
 class ClienteOnvif {
-  /**
-   * @param {object} cfg { host, puerto, usuario, clave, timeoutMs, registroXml, fetch }
-   */
+  // cfg: { host, puerto, usuario, clave, timeoutMs, registroXml, fetch }
   constructor(cfg) {
     this.host = cfg.host;
     this.puerto = cfg.puerto || 2020;
@@ -83,8 +67,6 @@ class ClienteOnvif {
     this.urlDispositivo = `http://${this.host}:${this.puerto}/onvif/device_service`;
   }
 
-  // ---------- Direcciones ----------
-
   /** Cambia host y puerto de una URL por los alcanzables; conserva ruta y consulta. */
   reescribir(url) {
     try {
@@ -94,8 +76,6 @@ class ClienteOnvif {
       throw new ErrorOnvif(`Direccion invalida devuelta por la camara: ${url}`, { tipo: 'formato' });
     }
   }
-
-  // ---------- Seguridad y construccion de mensajes ----------
 
   _seguridad() {
     if (!this.usuario) return '';
@@ -116,8 +96,6 @@ class ClienteOnvif {
     if (autenticar) cab += this._seguridad();
     return `<?xml version="1.0" encoding="UTF-8"?><s:Envelope xmlns:s="${NS.s}"><s:Header>${cab}</s:Header><s:Body>${cuerpo}</s:Body></s:Envelope>`;
   }
-
-  // ---------- Transporte ----------
 
   async _soap(url, cuerpo, opc = {}) {
     const { autenticar = true, accion = null, para = null, timeoutMs = this.timeoutMs } = opc;
@@ -164,8 +142,6 @@ class ClienteOnvif {
     if (!cuerpoResp) throw new ErrorOnvif('Respuesta de la camara no reconocible como SOAP.', { tipo: 'formato', http: r.status });
     return cuerpoResp;
   }
-
-  // ---------- Operaciones ----------
 
   /** Mide la diferencia de reloj con la camara. Sin autenticacion. */
   async horaCamara() {
@@ -259,12 +235,9 @@ class ClienteOnvif {
   }
 }
 
-/**
- * Convierte un NotificationMessage en un objeto plano:
- * { topic, utc, operacion, fuente, regla, datos, detector, valor }
- * detector/valor salen del nombre del dato (IsPeople / IsMotion), no del topic,
- * porque los topics pueden verse truncados o variar entre firmwares.
- */
+// Convierte un NotificationMessage en { topic, utc, operacion, fuente, regla, datos, detector, valor }.
+// detector y valor salen del nombre del dato (IsPeople / IsMotion), no del topic, porque los topics
+// pueden truncarse o variar entre firmwares.
 function interpretarNotificacion(n) {
   const topic = texto(n.Topic).trim();
   const interno = n.Message && n.Message.Message;

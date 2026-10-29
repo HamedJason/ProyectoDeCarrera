@@ -26,12 +26,12 @@ chequear() { local d="$1"; shift; if "$@"; then pasa "$d"; else falla "$d"; fi; 
 
 SCRIPTS=("$RAIZ"/vps/*.sh "$RAIZ"/pruebas/*.sh)
 
-# --- 1. sintaxis
+# Sintaxis
 for s in "${SCRIPTS[@]}"; do
   chequear "bash -n $(basename "$s")" bash -n "$s"
 done
 
-# --- 2. shellcheck (si esta instalado)
+# Shellcheck (si esta instalado)
 if command -v shellcheck >/dev/null 2>&1; then
   for s in "${SCRIPTS[@]}"; do
     chequear "shellcheck $(basename "$s")" shellcheck -x -S warning "$s"
@@ -40,7 +40,7 @@ else
   echo "OMITE  shellcheck no esta instalado"
 fi
 
-# --- 3. sin claves reales en el modulo (WireGuard: 43 caracteres base64 + '=')
+# Sin claves reales en el modulo (WireGuard: 43 caracteres base64 + '=')
 if grep -RIEn --exclude=prueba_estatica.sh '[A-Za-z0-9+/]{43}=' "$RAIZ" >/dev/null 2>&1; then
   falla "hay una cadena con forma de clave WireGuard dentro del modulo"
 else
@@ -48,7 +48,7 @@ else
 fi
 [ ! -e "$RAIZ/vps/puente.env" ] && pasa "no hay puente.env en el modulo" || falla "puente.env no debe estar en el repositorio"
 
-# --- 4. instalar_wireguard.sh en --dry-run con 'wg' simulado
+# instalar_wireguard.sh en --dry-run con 'wg' simulado
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/wg" <<'EOF'
 #!/usr/bin/env bash
@@ -95,7 +95,7 @@ chequear "choque de subredes: aborta con codigo 1 (codigo $codigo)" test "$codig
 chequear "choque de subredes: lo explica"          grep -q 'choca con la ruta' "$TMP/choque.log"
 chequear "choque de subredes: no crea wg0.conf"    test ! -e "$TMP/wg_choque/wg0.conf"
 
-# --- 5. lector de puente.env
+# Lector de puente.env
 cat > "$TMP/puente.env" <<'EOF'
 # comentario
 CAMARA_USUARIO=usuario1
@@ -112,7 +112,7 @@ chequear "env: clave con simbolos intacta"      test "$CAMARA_CLAVE" = 'p@ss w$(
 chequear "env: no ejecuto codigo del archivo"   test ! -e /tmp/NO_DEBE_EXISTIR
 chequear "env: valores por defecto"             test "$ONVIF_PUERTO" = "2020"
 
-# --- 6. URL RTSP y ocultamiento
+# URL RTSP y ocultamiento
 url="$(url_rtsp)"
 case "$url" in
   rtsp://usuario1:p%40ss%20w%24%28touch*@10.8.0.2:554/stream1) pasa "url_rtsp codifica la clave" ;;
@@ -124,7 +124,7 @@ case "$salida" in
   *) pasa "ocultar_clave tapa la clave (cruda y codificada)" ;;
 esac
 
-# --- 7. verificar_puente.sh sin tunel: debe fallar ordenadamente y sin filtrar la clave
+# verificar_puente.sh sin tunel: debe fallar ordenadamente y sin filtrar la clave
 printf 'CAMARA_IP_TUNEL=127.0.0.1\nCAMARA_USUARIO=u\nCAMARA_CLAVE=SECRETO_UNICO_123\nRTSP_PUERTO=1\nONVIF_PUERTO=2\n' > "$TMP/v.env"
 PUENTE_ENV="$TMP/v.env" bash "$RAIZ/vps/verificar_puente.sh" > "$TMP/ver.log" 2>&1
 codigo=$?

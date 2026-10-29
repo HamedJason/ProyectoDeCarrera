@@ -1,7 +1,4 @@
-/*
- * Estado de la vivienda que se esta viendo: armado, alarma, sensores, nodos e
- * historial. Se actualiza consultando al servidor cada pocos segundos.
- */
+// Estado de la vivienda que se ve: armado, alarma, sensores, nodos e historial. Se consulta al servidor cada pocos segundos.
 import { ref } from 'vue';
 import { pedir, ErrorSesion, mensajeDeError } from '../api/cliente.js';
 import { construirHitos } from '../utils/hitos.js';

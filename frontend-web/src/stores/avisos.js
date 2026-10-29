@@ -1,13 +1,6 @@
-/*
- * Avisos en el dispositivo: vibracion, sonido, parpadeo del titulo y
- * notificaciones push.
- *
- * Las notificaciones del sistema exigen una conexion segura (HTTPS o
- * localhost). Con el servidor en HTTP no estan disponibles, y para eso existen
- * las notificaciones push del servidor, que llegan aunque la app este cerrada.
- * En iPhone solo funciona el push cuando la pagina se agrego a la pantalla de
- * inicio y se abre desde ese icono.
- */
+// Avisos en el dispositivo: vibracion, sonido, parpadeo del titulo y notificaciones push.
+// Las notificaciones del sistema exigen HTTPS o localhost; el push del servidor llega aunque la app este cerrada
+// (en iPhone solo si la pagina se agrego a la pantalla de inicio y se abre desde ese icono).
 import { ref } from 'vue';
 import { pedir, pedirJson, mensajeDeError } from '../api/cliente.js';
 import { base64AUint8 } from '../utils/formato.js';

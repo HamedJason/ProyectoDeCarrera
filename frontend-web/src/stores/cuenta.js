@@ -1,8 +1,4 @@
-/*
- * Acciones de cuenta y viviendas: iniciar y cerrar sesion, elegir vivienda,
- * crear o unirse a una, administrarla. Cada una devuelve '' si salio bien o el
- * mensaje de error para mostrarlo en el formulario.
- */
+// Acciones de cuenta y viviendas. Cada una devuelve '' si salio bien o el mensaje de error para mostrarlo en el formulario.
 import { pedir, enviarJson, registrarCaducidad, ErrorSesion, mensajeDeError } from '../api/cliente.js';
 import { sesion, vivienda, pantalla, acceso } from './sesion.js';
 import { ui, abrirCasas, abrirGestion, cerrarTodo } from './ui.js';
@@ -11,8 +7,6 @@ import {
 } from './casa.js';
 import { refrescarCamara } from './camara.js';
 import { cancelarPush, cargarConfiguracion, sincronizarPush, reanudarPush } from './avisos.js';
-
-// ===================== Acceso y sesion =====================
 
 function mostrarAcceso() {
   pantalla.value = 'acceso';
@@ -111,8 +105,6 @@ export async function cambiarClave(actual, nueva) {
   }
 }
 
-// ===================== Viviendas =====================
-
 function entrarALaApp() {
   pantalla.value = 'app';
 
@@ -192,8 +184,6 @@ export async function unirseConCodigo(codigo) {
     return e instanceof ErrorSesion ? '' : mensajeDeError(e);
   }
 }
-
-// ===================== Administracion de la vivienda =====================
 
 const rutaCasa = () => '/viviendas/' + encodeURIComponent(vivienda.value);
 const resultado = (r, falla) => (r.ok ? '' : (r.datos.mensaje || falla));

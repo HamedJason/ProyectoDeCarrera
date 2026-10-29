@@ -1,40 +1,27 @@
-/*
- * Proyecto de Carrera - Sistema escalable de seguridad residencial
- * Camara ESP32-S3 con sensor OV5640
- *
- * No participa en la logica de la alarma: la alarma suena y avisa aunque la
- * camara este apagada. Cuando se dispara, el servidor le pide una rafaga de
- * fotos como evidencia, y el residente puede pedir una foto o la vista en vivo
- * desde la app.
- *
- * Como se comunica: la camara esta detras del router, asi que el servidor no
- * puede llamarla. Ella pregunta con una peticion larga
- *     GET /camara/tarea?camara_id=...&espera=20
- * que el servidor deja abierta hasta 20 s y contesta en cuanto hay una tarea.
- *   foto  rafaga de N fotos         -> POST /camara/foto?tarea=ID (JPEG crudo)
- *   vivo  vista en vivo por cuadros -> POST /camara/cuadro?tarea=ID, hasta que
- *         el servidor responde continuar=false
- * No se graba video y la vista en vivo usa resolucion baja para cuidar el VPS.
- *
- * CONFIGURACION SIN RECOMPILAR
- *   Monitor Serie a 115200 con "Nueva linea". Se guarda en la flash:
- *     wifi NOMBRE_DE_LA_RED
- *     clave PASSWORD
- *     token hv_...         (el mismo de la vivienda que usa el concentrador)
- *     servidor http://dominio:8080
- *     camara camara-1      (nombre, distinto en cada camara de la vivienda)
- *   Escribe "ayuda" para ver el resto. Los comandos se leen entre una consulta
- *   y otra, asi que pueden tardar hasta 20 s en responder cuando ya hay red.
- *
- * Libreria: ArduinoJson (Benoit Blanchon) 7.x. esp_camera.h viene con el core.
- *
- * Arduino IDE: placa "ESP32S3 Dev Module", PSRAM "OPI PSRAM" o "Enabled" segun
- * tu modulo (sin PSRAM no hay memoria para las fotos), Partition Scheme "Default".
- *
- * Enfoque: el autoenfoque del OV5640 requiere un firmware interno que este
- * programa no carga. Tratalo como enfoque manual y gira la lente una vez,
- * mirando la vista en vivo a la distancia del area vigilada.
- */
+// Camara ESP32-S3 con sensor OV5640. No participa en la logica de la alarma, que suena y avisa aunque la camara este
+// apagada: cuando se dispara, el servidor le pide una rafaga de fotos como evidencia, y el residente puede pedir una
+// foto o la vista en vivo desde la app.
+//
+// Como se comunica: esta detras del router y el servidor no puede llamarla, asi que ella pregunta con
+//   GET /camara/tarea?camara_id=...&espera=20
+// que el servidor deja abierta hasta 20 s y contesta en cuanto hay una tarea:
+//   foto  rafaga de N fotos         -> POST /camara/foto?tarea=ID (JPEG crudo)
+//   vivo  vista en vivo por cuadros -> POST /camara/cuadro?tarea=ID, hasta que el servidor responde continuar=false
+// No se graba video y la vista en vivo usa resolucion baja para cuidar el VPS.
+//
+// Configuracion sin recompilar: Monitor Serie a 115200 con "Nueva linea"; todo queda en flash.
+//   wifi NOMBRE_DE_LA_RED
+//   clave PASSWORD
+//   token hv_...         (el mismo de la vivienda que usa el concentrador)
+//   servidor http://dominio:8080
+//   camara camara-1      (nombre, distinto en cada camara de la vivienda)
+// "ayuda" muestra el resto. Los comandos se leen entre una consulta y otra: con red pueden tardar hasta 20 s.
+//
+// Libreria: ArduinoJson (Benoit Blanchon) 7.x; esp_camera.h viene con el core.
+// Arduino IDE: placa "ESP32S3 Dev Module", PSRAM "OPI PSRAM" o "Enabled" segun tu modulo (sin PSRAM no hay memoria
+// para las fotos), Partition Scheme "Default".
+// Enfoque: el autoenfoque del OV5640 requiere un firmware interno que este programa no carga; tratalo como enfoque
+// manual y gira la lente una vez, mirando la vista en vivo a la distancia del area vigilada.
 
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -44,8 +31,6 @@
 #include "raiz_tls.h"
 #include <ArduinoJson.h>
 #include "esp_camera.h"
-
-// ===================== Configuracion =====================
 
 const char* BACKEND_POR_DEFECTO = "http://privadaochil.ddns.net:8080";
 const char* CAMARA_POR_DEFECTO  = "camara-1";
@@ -87,15 +72,11 @@ const int AJ_GANANCIA_MAX = 225;       // 0 a 511
 
 const int PIN_FLASH = -1;   // LED de flash para las fotos de alarma (-1 si no hay)
 
-// ===================== Parametros de red =====================
-
 const unsigned long ESPERA_TAREA_S = 20;              // espera del servidor (maximo 25)
 const unsigned long TIMEOUT_TAREA_MS = 30000;         // debe ser mayor que la espera
 const unsigned long TIMEOUT_SUBIDA_MS = 15000;
 const unsigned long REINICIO_SIN_WIFI_MS = 600000;    // reinicia tras 10 min sin Wi-Fi
 const int CUADROS_DESCARTADOS = 2;                    // deja que la exposicion se ajuste
-
-// ===================== Pines segun la placa =====================
 
 #if defined(BOARD_XIAO_ESP32S3_SENSE)
   #define PWDN_GPIO_NUM  -1
@@ -170,8 +151,6 @@ const int CUADROS_DESCARTADOS = 2;                    // deja que la exposicion 
   #error "Descomenta una placa en la seccion de configuracion."
 #endif
 
-// ===================== Configuracion guardada =====================
-
 Preferences prefs;
 String cfgSsid, cfgClave, cfgToken, cfgServidor, cfgCamaraId;
 String lineaSerie;
@@ -185,8 +164,7 @@ void cargarConfig() {
   cfgCamaraId = prefs.getString("camara", CAMARA_POR_DEFECTO);
 }
 
-// ===================== HTTP / HTTPS =====================
-// El esquema de la URL del servidor decide: http:// o https://
+// HTTP / HTTPS: el esquema de la URL del servidor decide si es http:// o https://
 
 WiFiClient clienteRed;
 WiFiClientSecure clienteTls;
@@ -213,8 +191,6 @@ bool camaraLista = false;
 unsigned long tSinWiFi = 0;
 int fallosConsecutivos = 0;
 framesize_t tamanoActual = FRAMESIZE_INVALID;
-
-// ===================== Camara =====================
 
 void aplicarAjustesSensor(sensor_t* s) {
   s->set_brightness(s, AJ_BRILLO);
@@ -296,8 +272,6 @@ void usarPerfil(framesize_t tamano, int calidad) {
   }
 }
 
-// ===================== Red =====================
-
 void atenderWiFi() {
   if (cfgSsid.length() == 0) return;
 
@@ -346,8 +320,6 @@ int subirImagen(const String& ruta, camera_fb_t* fb, String* respuesta) {
   http.end();
   return codigo;
 }
-
-// ===================== Tareas =====================
 
 void tomarRafaga(long tareaId, int cantidad, int intervaloMs) {
   Serial.printf("[Foto] Tarea %ld: %d foto(s)\n", tareaId, cantidad);
@@ -434,8 +406,6 @@ bool consultarTarea() {
   }
   return true;
 }
-
-// ===================== Consola serie =====================
 
 String enmascarar(const String& s, int visibles) {
   if (s.length() == 0) return "(vacio)";
@@ -549,8 +519,6 @@ void avisarConfigIncompleta() {
   if (cfgSsid.length() == 0) Serial.println("[Config] Falta la red. Escribe: wifi NOMBRE y despues clave PASSWORD");
   else if (cfgToken.length() == 0) Serial.println("[Config] Falta el token. Escribe: token hv_...");
 }
-
-// ===================== setup / loop =====================
 
 void setup() {
   Serial.begin(115200);

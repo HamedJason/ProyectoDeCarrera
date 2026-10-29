@@ -1,4 +1,3 @@
-<!-- Visor de una foto de la camara -->
 <script setup>
 import { ref, computed, watch } from 'vue';
 import Hoja from './Hoja.vue';

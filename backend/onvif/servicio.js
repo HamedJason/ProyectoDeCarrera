@@ -1,15 +1,7 @@
-/*
- * Servicio ONVIF de una camara.
- *
- * Mantiene una suscripcion PullPoint abierta, recibe los mensajes con long
- * polling y se los pasa al motor de estados. Se encarga de:
- *   - renovar la suscripcion antes de que expire (mitad de su duracion);
- *   - recuperarse solo de cualquier error, con esperas crecientes;
- *   - avisar al motor cuando se pierde o se recupera la conexion;
- *   - no abrir nunca el video: solo usa el puerto ONVIF.
- *
- * Un solo bucle por camara: nunca hay dos PullMessages a la vez.
- */
+// Servicio ONVIF de una camara: mantiene una suscripcion PullPoint con long polling y pasa los mensajes
+// al motor de estados. Un solo bucle por camara (nunca dos PullMessages a la vez). Renueva la suscripcion
+// a la mitad de su duracion, se recupera de errores con esperas crecientes, avisa al motor cuando se pierde
+// o se recupera la conexion y nunca abre el video.
 
 const { ClienteOnvif, ErrorOnvif } = require('./cliente');
 

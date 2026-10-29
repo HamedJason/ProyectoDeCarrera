@@ -1,13 +1,5 @@
-/*
- * Certificados raiz para validar el servidor por HTTPS.
- *
- * Contiene ISRG Root X1 e ISRG Root X2, las raices de Let's Encrypt, que es quien
- * emite el certificado del servidor. Son certificados PUBLICOS, no secretos.
- * Vencen en 2035 y 2040. Si Let's Encrypt cambia su jerarquia y la conexion
- * falla con un error de certificado, hay que reemplazar este contenido por la
- * raiz que corresponda a la cadena actual del servidor.
- * Para ver la cadena: openssl s_client -connect <dominio>:443 -showcerts
- */
+// Raices ISRG Root X1 y X2 de Let's Encrypt para validar el servidor por HTTPS (certificados PUBLICOS; vencen en 2035 y 2040).
+// Si la conexion falla con error de certificado, reemplazar por la raiz de la cadena actual: openssl s_client -connect <dominio>:443 -showcerts
 #pragma once
 
 const char RAIZ_TLS[] =

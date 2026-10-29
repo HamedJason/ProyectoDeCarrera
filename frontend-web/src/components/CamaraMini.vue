@@ -1,4 +1,3 @@
-<!-- Estado de la camara en la tarjeta principal: conexion, lo que ve ahora y ultima deteccion -->
 <script setup>
 import { computed } from 'vue';
 import {

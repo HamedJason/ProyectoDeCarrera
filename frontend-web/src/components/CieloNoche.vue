@@ -1,4 +1,3 @@
-<!-- Cielo nocturno con estrellas, luna y casas; se ve a traves de la puerta y de la ventana -->
 <template>
   <div class="cielo"></div>
   <div class="estrellas"></div>

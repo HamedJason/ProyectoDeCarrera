@@ -1,19 +1,9 @@
 #!/usr/bin/env node
-/*
- * Mide cuantos cuadros por segundo da de verdad el flujo de la camara por el tunel, con el mismo
- * ffmpeg y los mismos parametros que la vista en vivo, pero sin enviar nada al servidor.
- * Sirve para elegir CAMARA_VIVO_FPS con datos en lugar de a ojo.
- *
- * Uso (en el VPS, dentro del contenedor, que ya tiene el usuario y la clave de la camara):
- *   docker exec alarma_backend node camara_medir.js            # 10 s por prueba, stream2
- *   docker exec alarma_backend node camara_medir.js 15 stream1 # 15 s por prueba, otro flujo
- *   docker exec alarma_backend node camara_medir.js 10 stream2 960   # con otro ancho (por omision 640)
- *
- * Para cada valor de fps muestra los cuadros que salen realmente por segundo, el tamano de cada
- * cuadro y el caudal que habria hacia el telefono. Primero mide el maximo del flujo sin limite.
- *
- * No abre mas flujos que los suyos, pero tampoco conviene correrlo con una vista en vivo abierta.
- */
+// Mide cuantos cuadros por segundo da de verdad el flujo de la camara por el tunel, con el mismo ffmpeg y
+// parametros que la vista en vivo pero sin enviar nada al servidor; sirve para elegir CAMARA_VIVO_FPS.
+// Uso (en el VPS, dentro del contenedor): docker exec alarma_backend node camara_medir.js [segundos] [stream] [ancho]
+// (por omision 10 s, stream2 y ancho 640). Mide primero el maximo del flujo sin limite y luego cada fps.
+// No conviene correrlo con una vista en vivo abierta.
 
 const { spawn } = require('child_process');
 const { leerConfig, entradaRtsp, alcanzable } = require('./camara_rtsp');

@@ -1,4 +1,3 @@
-<!-- Tarjeta principal: titular del estado, botones de armado y estado de la camara -->
 <script setup>
 import { computed } from 'vue';
 import CamaraMini from './CamaraMini.vue';

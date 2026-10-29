@@ -1,5 +1,4 @@
-# Imagen del backend de la prueba de concepto.
-# Se usa Alpine por ser ligera, lo que reduce el tiempo de construcción en el VPS.
+# Imagen del backend. Alpine por ser ligera.
 
 FROM node:20-alpine
 

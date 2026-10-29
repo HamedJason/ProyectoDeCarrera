@@ -1,4 +1,3 @@
-/* ---- Pantalla de acceso ---- */
 #acceso { display: none; min-height: 100vh; padding: 24px 16px; align-items: center; justify-content: center; }
 #acceso.visible { display: flex; }
 .acceso-caja { width: min(420px, 100%); background: var(--papel); border: 1px solid var(--linea); border-radius: 22px; padding: 26px 22px 22px; }

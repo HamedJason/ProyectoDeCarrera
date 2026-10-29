@@ -1,4 +1,3 @@
-<!-- Barra superior: selector de vivienda, estado de la conexion y acceso al panel lateral -->
 <script setup>
 import { computed } from 'vue';
 import { vivienda, nombreCasa, sesion } from '../stores/sesion.js';

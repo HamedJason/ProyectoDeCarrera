@@ -1,8 +1,5 @@
-<!--
-  Ilustracion de cada tipo de sensor, hecha solo con HTML y CSS. Este componente
-  nunca cambia de clases: el movimiento lo define la hoja de estilos segun las
-  clases de la tarjeta que lo contiene (abierta, actividad, disparado...).
--->
+<!-- Ilustracion de cada sensor solo con HTML y CSS. Nunca cambia de clases: el movimiento lo define la hoja de
+     estilos segun las clases de la tarjeta que lo contiene (abierta, actividad, disparado...). -->
 <script setup>
 import CieloNoche from './CieloNoche.vue';
 defineProps({ tipo: { type: String, required: true } });
