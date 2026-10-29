@@ -25,9 +25,14 @@ for i in $(seq 1 20); do
   sleep 2
 done
 echo -n "Local:   "; curl -s "http://localhost:${BACKEND_PORT:-8080}/auth/estado"; echo
-echo -n "Publico: "; curl -s -o /dev/null -w "%{http_code}\n" "https://${DOMINIO}/auth/estado" || true
+echo -n "Publico: "; PUBLICO=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "https://${DOMINIO}/auth/estado" || true); echo "$PUBLICO"
 
 echo "==> Ultimas lineas del backend"
 docker logs --tail 12 alarma_backend
 echo
-echo "Si 'Publico' no dice 200, el proxy no ve al backend: revisa docker-compose.proxy.yml."
+if [ "$PUBLICO" = "200" ]; then
+  echo "Conectado a ${DOMINIO}: OK"
+else
+  echo "Conectado a ${DOMINIO}: FALLA (respuesta ${PUBLICO}). El proxy no ve al backend: revisa docker-compose.proxy.yml y que el dominio apunte a este servidor."
+  exit 1
+fi
